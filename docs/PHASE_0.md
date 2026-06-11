@@ -77,6 +77,8 @@ gate is scored exclusively on iPhone 11 hardware.
 - Model download/checksum UI is Phase 1 (`ModelManager`); Phase 0 side-loads
   via file sharing.
 - llama.cpp upgrades: check out the new tag inside `third_party/llama.cpp`,
-  bump `LLAMA_TAG` in `scripts/build-llama-xcframework.sh` to match (the build
-  fails if they drift), rebuild, re-run `scripts/test-engine-macos.sh`, and
-  commit the submodule bump together with the script change.
+  bump `LLAMA_TAG` **and** `LLAMA_COMMIT` in
+  `scripts/build-llama-xcframework.sh` to match (the build fails if they
+  drift from the checkout; the SHA is what's compared — shallow CI clones
+  have no tags), rebuild, re-run `scripts/test-engine-macos.sh`, and commit
+  the submodule bump together with the script change.

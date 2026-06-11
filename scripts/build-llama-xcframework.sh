@@ -23,20 +23,23 @@ BUILD_ROOT="${REPO_ROOT}/build"
 OUT_DIR="${REPO_ROOT}/Frameworks"
 
 # llama.cpp lives in a git submodule; the gitlink is the authoritative pin.
-# LLAMA_TAG is the human-readable mirror of that pin — the check below fails
-# the build if the two ever drift. Bump both deliberately; verify Gemma 4
-# mtmd support is still present after any upgrade.
+# LLAMA_TAG/LLAMA_COMMIT are the human-readable mirror of that pin — the
+# check below fails the build if they drift from the actual checkout. The
+# comparison uses the commit SHA, not the tag: shallow submodule clones
+# (CI, .gitmodules shallow=true) don't fetch tag objects. Bump all three
+# together; verify Gemma 4 mtmd support is still present after any upgrade.
 LLAMA_TAG="b9596"
+LLAMA_COMMIT="18ef86ecec723361362a332a79b4d913fd724d40"
 
 if [[ ! -f "${LLAMA_SRC}/CMakeLists.txt" ]]; then
     echo "== Initialising llama.cpp submodule =="
     git -C "${REPO_ROOT}" submodule update --init --depth 1 third_party/llama.cpp
 fi
 
-CHECKED_OUT="$(git -C "${LLAMA_SRC}" describe --tags --exact-match 2>/dev/null || true)"
-if [[ "${CHECKED_OUT}" != "${LLAMA_TAG}" ]]; then
-    echo "error: third_party/llama.cpp is at '${CHECKED_OUT:-unknown}', expected '${LLAMA_TAG}'" >&2
-    echo "       if you bumped the submodule, update LLAMA_TAG in this script (and vice versa);" >&2
+CHECKED_OUT="$(git -C "${LLAMA_SRC}" rev-parse HEAD 2>/dev/null || true)"
+if [[ "${CHECKED_OUT}" != "${LLAMA_COMMIT}" ]]; then
+    echo "error: third_party/llama.cpp is at '${CHECKED_OUT:-unknown}', expected ${LLAMA_COMMIT} (${LLAMA_TAG})" >&2
+    echo "       if you bumped the submodule, update LLAMA_TAG/LLAMA_COMMIT in this script;" >&2
     echo "       otherwise run: git submodule update --init third_party/llama.cpp" >&2
     exit 1
 fi
