@@ -29,7 +29,7 @@ playground.xcworkspace
 # hence it is not needed unless you have added a package configuration file to your project
 # .swiftpm
 
-.build/
+build/
 
 # CocoaPods
 #
@@ -60,3 +60,16 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# MD file
+#
+
+PLAN.md
+
+# Third Party
+#
+
+third_party/*
+
+# Built artifacts (reproduce with scripts/build-llama-xcframework.sh)
+Frameworks/llama.xcframework/
