@@ -147,6 +147,45 @@ final class SmokeTestViewModel {
         engine.cancel()
     }
 
+    // MARK: - Headless CI mode
+
+    /// `--auto-benchmark` runs load + benchmark hands-free and drops a
+    /// machine-readable verdict into Documents/benchmark-result.json for CI
+    /// to assert on. Performance gates are NOT scored here — CI simulators
+    /// run on CPU; only the device run scores the Phase 0 exit gate.
+    func autoRunIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("--auto-benchmark") else { return }
+        Task {
+            await loadModel()
+            await runBenchmark()
+            writeBenchmarkResultFile()
+        }
+    }
+
+    private func writeBenchmarkResultFile() {
+        let status: String
+        switch loadState {
+        case .failed: status = "load_failed"
+        case .loaded where (result?.stats.decodeTokens ?? 0) > 0: status = "ok"
+        default: status = "generate_failed"
+        }
+        let payload: [String: Any] = [
+            "status": status,
+            "loadSeconds": result?.loadSeconds ?? 0,
+            "ttftSeconds": result?.timeToFirstTokenSeconds ?? 0,
+            "decodeTokens": result?.stats.decodeTokens ?? 0,
+            "decodeTokensPerSecond": result?.stats.decodeTokensPerSecond ?? 0,
+            "prefillReused": result?.stats.prefillReused ?? 0,
+            "peakFootprintBytes": result?.peakFootprint ?? 0,
+            "output": output
+        ]
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = docs.appendingPathComponent("benchmark-result.json")
+        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
     // MARK: - Memory sampling
 
     private func startMemorySampling() {

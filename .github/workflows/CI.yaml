@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  # Tiny public instruct model used for functional smoke tests (~138 MB).
+  # CI never scores performance — that's the iPhone's job.
+  MODEL_URL: https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q8_0.gguf
+  MODEL_PATH: build/models/SmolLM2-135M-Instruct-Q8_0.gguf
+
+jobs:
+  lint:
+    name: Lint (Swift + C/C++)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install linters
+        run: brew install swiftlint clang-format cppcheck
+
+      - name: SwiftLint
+        run: swiftlint lint --strict --reporter github-actions-logging
+
+      - name: C/C++ lint (clang-format + cppcheck)
+        run: scripts/lint-cpp.sh
+
+  framework:
+    name: Build llama.xcframework (cached)
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache llama.xcframework
+        id: fw-cache
+        uses: actions/cache@v4
+        with:
+          path: Frameworks/llama.xcframework
+          # The build script embeds the llama.cpp tag and all build flags, so
+          # its hash is the complete cache identity.
+          key: llama-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-llama-xcframework.sh') }}
+
+      - name: Build XCFramework
+        if: steps.fw-cache.outputs.cache-hit != 'true'
+        run: scripts/build-llama-xcframework.sh
+
+  engine-test:
+    name: Engine smoke test (macOS)
+    runs-on: macos-latest
+    needs: [lint, framework]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore llama.xcframework
+        uses: actions/cache/restore@v4
+        with:
+          path: Frameworks/llama.xcframework
+          key: llama-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-llama-xcframework.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Cache test model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: build/models
+          key: model-smollm2-135m-q8
+
+      - name: Download test model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p build/models
+          curl -sL --fail -o "$MODEL_PATH" "$MODEL_URL"
+
+      - name: Run engine smoke test
+        env:
+          # CI VMs may not expose a usable Metal device — force CPU.
+          SYNAP_SMOKE_CPU: "1"
+        run: scripts/test-engine-macos.sh "$MODEL_PATH"
+
+  simulator-smoketest:
+    name: App SmokeTest (iOS Simulator)
+    runs-on: macos-latest
+    needs: [lint, framework]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore llama.xcframework
+        uses: actions/cache/restore@v4
+        with:
+          path: Frameworks/llama.xcframework
+          key: llama-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-llama-xcframework.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Cache test model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: build/models
+          key: model-smollm2-135m-q8
+
+      - name: Download test model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p build/models
+          curl -sL --fail -o "$MODEL_PATH" "$MODEL_URL"
+
+      - name: Run simulator smoke test
+        run: scripts/simulator-smoketest.sh "$MODEL_PATH"

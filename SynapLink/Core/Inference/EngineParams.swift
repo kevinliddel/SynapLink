@@ -11,15 +11,15 @@ import Foundation
 
 /// KV cache quantization. Raw values are ggml_type constants.
 enum KVCacheType: Int32, Sendable {
-    case f16  = 1
+    case f16 = 1
     case q4_0 = 2
     case q8_0 = 8
 }
 
 enum FlashAttention: Int32, Sendable {
-    case auto     = -1
+    case auto = -1
     case disabled = 0
-    case enabled  = 1
+    case enabled = 1
 }
 
 struct EngineParams: Sendable {
@@ -29,7 +29,14 @@ struct EngineParams: Sendable {
     var nCtx: Int32 = 2048
     var nBatch: Int32 = 512
     var nThreads: Int32 = Int32(min(4, ProcessInfo.processInfo.processorCount))
-    var nGPULayers: Int32 = 999
+    // Proactive CPU fallback in the simulator :
+    // Simulator Metal is emulated/absent and CPU is both faster and reliable there.
+    // Real devices get full offload.
+    #if targetEnvironment(simulator)
+        var nGPULayers: Int32 = 0
+    #else
+        var nGPULayers: Int32 = 999
+    #endif
 
     // Quantized KV requires flash attention enabled.
     var kvTypeK: KVCacheType = .q8_0
@@ -50,21 +57,21 @@ struct EngineParams: Sendable {
     /// the duration of `body` — never let the pointer escape it.
     func withCParams<R>(_ body: (SynapEngineParams) throws -> R) rethrows -> R {
         var cParams = synap_engine_params_default()
-        cParams.n_ctx          = nCtx
-        cParams.n_batch        = nBatch
-        cParams.n_threads      = nThreads
-        cParams.n_gpu_layers   = nGPULayers
-        cParams.kv_type_k      = kvTypeK.rawValue
-        cParams.kv_type_v      = kvTypeV.rawValue
-        cParams.flash_attn     = flashAttention.rawValue
+        cParams.n_ctx = nCtx
+        cParams.n_batch = nBatch
+        cParams.n_threads = nThreads
+        cParams.n_gpu_layers = nGPULayers
+        cParams.kv_type_k = kvTypeK.rawValue
+        cParams.kv_type_v = kvTypeV.rawValue
+        cParams.flash_attn = flashAttention.rawValue
         cParams.mmproj_use_gpu = mmprojUseGPU
-        cParams.warmup         = warmup
-        cParams.temp           = temperature
-        cParams.top_p          = topP
-        cParams.top_k          = topK
+        cParams.warmup = warmup
+        cParams.temp = temperature
+        cParams.top_p = topP
+        cParams.top_k = topK
         cParams.repeat_penalty = repeatPenalty
-        cParams.repeat_last_n  = repeatLastN
-        cParams.seed           = seed
+        cParams.repeat_last_n = repeatLastN
+        cParams.seed = seed
 
         return try modelPath.withCString { modelCStr in
             cParams.model_path = modelCStr
@@ -98,11 +105,11 @@ struct GenerationStats: Sendable {
     init() {}
 
     init(c: SynapGenStats) {
-        promptTokens  = c.prompt_tokens
+        promptTokens = c.prompt_tokens
         prefillReused = c.prefill_reused
-        prefillNew    = c.prefill_new
-        prefillMs     = c.prefill_ms
-        decodeTokens  = c.decode_tokens
-        decodeMs      = c.decode_ms
+        prefillNew = c.prefill_new
+        prefillMs = c.prefill_ms
+        decodeTokens = c.decode_tokens
+        decodeMs = c.decode_ms
     }
 }

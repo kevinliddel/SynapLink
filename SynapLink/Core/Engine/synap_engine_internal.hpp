@@ -16,10 +16,10 @@
 #include <vector>
 
 struct SynapEngine {
-    llama_model*   model   = nullptr;
+    llama_model* model     = nullptr;
     llama_context* ctx     = nullptr;
     llama_sampler* sampler = nullptr;
-    mtmd_context*  mctx    = nullptr;  // NULL when running text-only
+    mtmd_context* mctx     = nullptr; // NULL when running text-only
 
     // Tokens currently materialised in the KV cache (text-only turns).
     // Used for longest-common-prefix reuse across turns.
@@ -29,15 +29,15 @@ struct SynapEngine {
     // (media chunks occupy positions), so the next text turn must clear.
     bool kv_has_media = false;
 
-    std::atomic<bool> cancel_flag { false };
+    std::atomic<bool> cancel_flag{false};
 
     // Telemetry for the most recent generate call.
     int32_t last_prompt_tokens  = 0;
     int32_t last_prefill_reused = 0;
     int32_t last_prefill_new    = 0;
-    double  last_prefill_ms     = 0.0;
+    double last_prefill_ms      = 0.0;
     int32_t last_decode_tokens  = 0;
-    double  last_decode_ms      = 0.0;
+    double last_decode_ms       = 0.0;
 };
 
 /// Length of the longest prefix of `buf` that ends on a complete UTF-8
@@ -52,17 +52,23 @@ inline std::size_t utf8_safe_prefix(const std::string& buf) {
     std::size_t i = n;
     while (i > 0 && (static_cast<unsigned char>(buf[i - 1]) & 0xC0) == 0x80) {
         --i;
-        if (n - i >= 4) { return n; }  // > 4 trailing continuations: malformed, flush all
+        if (n - i >= 4) { return n; } // > 4 trailing continuations: malformed, flush all
     }
-    if (i == 0) { return n; }  // nothing but continuation bytes: malformed, flush all
+    if (i == 0) { return n; } // nothing but continuation bytes: malformed, flush all
 
     const unsigned char lead = static_cast<unsigned char>(buf[i - 1]);
     std::size_t expected;
-    if      ((lead & 0x80) == 0x00) { expected = 1; }
-    else if ((lead & 0xE0) == 0xC0) { expected = 2; }
-    else if ((lead & 0xF0) == 0xE0) { expected = 3; }
-    else if ((lead & 0xF8) == 0xF0) { expected = 4; }
-    else                            { return n; }  // invalid lead byte: flush all
+    if ((lead & 0x80) == 0x00) {
+        expected = 1;
+    } else if ((lead & 0xE0) == 0xC0) {
+        expected = 2;
+    } else if ((lead & 0xF0) == 0xE0) {
+        expected = 3;
+    } else if ((lead & 0xF8) == 0xF0) {
+        expected = 4;
+    } else {
+        return n;
+    } // invalid lead byte: flush all
 
     const std::size_t have = n - (i - 1);
     return have >= expected ? n : i - 1;

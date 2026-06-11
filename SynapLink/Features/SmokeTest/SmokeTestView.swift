@@ -25,14 +25,7 @@ struct SmokeTestView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 viewModel.refreshModels()
-                // Hands-free CI/simulator runs: load the auto-picked model and
-                // benchmark immediately.
-                if ProcessInfo.processInfo.arguments.contains("--auto-benchmark") {
-                    Task {
-                        await viewModel.loadModel()
-                        await viewModel.runBenchmark()
-                    }
-                }
+                viewModel.autoRunIfRequested()
             }
         }
     }

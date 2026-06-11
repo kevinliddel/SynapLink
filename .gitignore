@@ -66,10 +66,7 @@ fastlane/test_output
 
 PLAN.md
 
-# Third Party
-#
-
-third_party/*
+# Third Party: tracked as git submodules (see .gitmodules), not ignored.
 
 # Built artifacts (reproduce with scripts/build-llama-xcframework.sh)
 Frameworks/llama.xcframework/

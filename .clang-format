@@ -1,0 +1,25 @@
+# C/C++ style for SynapLink's engine code (SynapLink/Core/Engine, tests/).
+# third_party/ is upstream code and is never formatted or linted by us.
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++17
+
+IndentWidth: 4
+ColumnLimit: 120
+PointerAlignment: Left
+
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Always
+
+AlignConsecutiveAssignments: Consecutive
+AlignTrailingComments: true
+AlignAfterOpenBracket: Align
+
+BreakBeforeBraces: Attach
+SpaceBeforeParens: ControlStatements
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+ReflowComments: false
+SortIncludes: false

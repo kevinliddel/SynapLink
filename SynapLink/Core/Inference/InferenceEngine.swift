@@ -2,8 +2,8 @@
 //  InferenceEngine.swift
 //  SynapLink
 //
-//  The single serialized owner of the C++ inference core (PLAN.md §3: one
-//  inference actor, no concurrent contexts on 4 GB).
+//  The single serialized owner of the C++ inference core
+//  (One inference actor, no concurrent contexts on 4 GB).
 //
 //  All blocking C calls run on a dedicated serial DispatchQueue — not on the
 //  Swift cooperative thread pool, which must never be blocked for seconds.
@@ -38,7 +38,7 @@ enum InferenceEngineError: Error, LocalizedError {
 }
 
 struct ChatMessage: Sendable {
-    var role: String   // "system" | "user" | "assistant"
+    var role: String  // "system" | "user" | "assistant"
     var content: String
 }
 
@@ -47,7 +47,7 @@ struct EngineCapabilities: Sendable {
     var modelDescription: String
     var hasVision: Bool
     var hasAudio: Bool
-    var audioSampleRate: Int32   // -1 when audio unsupported
+    var audioSampleRate: Int32  // -1 when audio unsupported
     var nCtx: Int32
 }
 
@@ -55,7 +55,8 @@ final class InferenceEngine: @unchecked Sendable {
 
     static let shared = InferenceEngine()
 
-    private let queue = DispatchQueue(label: "com.dedicatus.synaplink.inference", qos: .userInitiated)
+    private let queue = DispatchQueue(
+        label: "com.dedicatus.synaplink.inference", qos: .userInitiated)
     private let handleLock = NSLock()
     private var _handle: OpaquePointer?
 
@@ -69,12 +70,14 @@ final class InferenceEngine: @unchecked Sendable {
     }
 
     private func currentHandle() -> OpaquePointer? {
-        handleLock.lock(); defer { handleLock.unlock() }
+        handleLock.lock()
+        defer { handleLock.unlock() }
         return _handle
     }
 
     private func setHandle(_ handle: OpaquePointer?) {
-        handleLock.lock(); defer { handleLock.unlock() }
+        handleLock.lock()
+        defer { handleLock.unlock() }
         _handle = handle
     }
 
@@ -94,8 +97,9 @@ final class InferenceEngine: @unchecked Sendable {
                     withUnsafePointer(to: cParams) { synap_engine_create($0) }
                 }
                 guard let handle else {
-                    continuation.resume(throwing: InferenceEngineError.loadFailed(
-                        model: (params.modelPath as NSString).lastPathComponent))
+                    continuation.resume(
+                        throwing: InferenceEngineError.loadFailed(
+                            model: (params.modelPath as NSString).lastPathComponent))
                     return
                 }
                 setHandle(handle)
@@ -140,9 +144,11 @@ final class InferenceEngine: @unchecked Sendable {
     ///
     /// Cancelling the consuming task cancels generation; the stream then
     /// finishes normally with the tokens produced so far.
-    func generate(prompt: String,
-                  media: [Data] = [],
-                  maxNewTokens: Int32 = 512) -> AsyncThrowingStream<String, Error> {
+    func generate(
+        prompt: String,
+        media: [Data] = [],
+        maxNewTokens: Int32 = 512
+    ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             continuation.onTermination = { [weak self] termination in
                 if case .cancelled = termination { self?.cancel() }
@@ -164,7 +170,8 @@ final class InferenceEngine: @unchecked Sendable {
                             maxNewTokens,
                             { cPiece, userData in
                                 guard let cPiece, let userData else { return false }
-                                let sink = Unmanaged<TokenSink>.fromOpaque(userData).takeUnretainedValue()
+                                let sink = Unmanaged<TokenSink>.fromOpaque(userData)
+                                    .takeUnretainedValue()
                                 return sink.onPiece(String(cString: cPiece))
                             },
                             Unmanaged.passUnretained(sink).toOpaque())
@@ -215,8 +222,10 @@ final class InferenceEngine: @unchecked Sendable {
 
     /// Format messages with the model's built-in chat template (no hand-rolled
     /// template strings that drift between model versions).
-    func applyChatTemplate(_ messages: [ChatMessage],
-                           addGenerationPrompt: Bool = true) async throws -> String {
+    func applyChatTemplate(
+        _ messages: [ChatMessage],
+        addGenerationPrompt: Bool = true
+    ) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
                 guard let handle = currentHandle() else {
@@ -237,7 +246,8 @@ final class InferenceEngine: @unchecked Sendable {
                             addGenerationPrompt, &buf, Int32(buf.count))
                     }
                     guard written > 0 else { return nil }
-                    return String(decoding: buf[0..<Int(written)].map(UInt8.init), as: UTF8.self)
+                    let bytes = buf[0..<Int(written)].map { UInt8(bitPattern: $0) }
+                    return String(bytes: bytes, encoding: .utf8)
                 }
                 if let result {
                     continuation.resume(returning: result)
@@ -252,15 +262,20 @@ final class InferenceEngine: @unchecked Sendable {
 
     /// Pin `media` buffers and expose them as C media inputs for the duration
     /// of `body`.
-    private static func withMediaInputs<R>(_ media: [Data],
-                                           _ body: ([SynapMediaInput]) -> R) -> R {
-        func recurse(_ index: Int, _ acc: inout [SynapMediaInput],
-                     _ body: ([SynapMediaInput]) -> R) -> R {
+    private static func withMediaInputs<R>(
+        _ media: [Data],
+        _ body: ([SynapMediaInput]) -> R
+    ) -> R {
+        func recurse(
+            _ index: Int, _ acc: inout [SynapMediaInput],
+            _ body: ([SynapMediaInput]) -> R
+        ) -> R {
             if index == media.count { return body(acc) }
             return media[index].withUnsafeBytes { rawBuf in
-                acc.append(SynapMediaInput(
-                    data: rawBuf.bindMemory(to: UInt8.self).baseAddress,
-                    len: rawBuf.count))
+                acc.append(
+                    SynapMediaInput(
+                        data: rawBuf.bindMemory(to: UInt8.self).baseAddress,
+                        len: rawBuf.count))
                 defer { acc.removeLast() }
                 return recurse(index + 1, &acc, body)
             }
@@ -271,9 +286,13 @@ final class InferenceEngine: @unchecked Sendable {
     }
 
     /// Pin two string arrays as null-terminated C string arrays for `body`.
-    private static func withCStringArrays<R>(_ a: [String], _ b: [String],
-                                             _ body: (UnsafePointer<UnsafePointer<CChar>?>,
-                                                      UnsafePointer<UnsafePointer<CChar>?>) -> R) -> R {
+    private static func withCStringArrays<R>(
+        _ a: [String], _ b: [String],
+        _ body: (
+            UnsafePointer<UnsafePointer<CChar>?>,
+            UnsafePointer<UnsafePointer<CChar>?>
+        ) -> R
+    ) -> R {
         let aDup = a.map { strdup($0) }
         let bDup = b.map { strdup($0) }
         defer {
