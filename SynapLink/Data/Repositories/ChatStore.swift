@@ -79,7 +79,13 @@ final class ChatStore: ChatRepositoryProtocol {
 
     func deleteChat(id: Int64) {
         guard let db = database else { return }
+        // Collect attachment files before the cascade wipes their rows.
+        let fileNames = db.query("""
+            SELECT a.file_name FROM attachments a
+            JOIN messages m ON m.id = a.message_id WHERE m.chat_id = ?
+            """, [.int(id)]) { stmt in ChatDatabase.text(stmt, 0) }
         db.run("DELETE FROM chats WHERE id = ?", [.int(id)])
+        removeAttachmentFiles(fileNames)
         mutated()
     }
 
@@ -94,7 +100,7 @@ final class ChatStore: ChatRepositoryProtocol {
 
     func messages(chatID: Int64) -> [Message] {
         guard let db = database else { return [] }
-        return db.query(
+        var messages = db.query(
             "SELECT id, chat_id, role, content, created_at FROM messages WHERE chat_id = ? ORDER BY id",
             [.int(chatID)]
         ) { stmt in
@@ -104,6 +110,23 @@ final class ChatStore: ChatRepositoryProtocol {
                     content: ChatDatabase.text(stmt, 3),
                     createdAt: Date(timeIntervalSince1970: ChatDatabase.double(stmt, 4)))
         }
+
+        // One query for the whole chat's attachments, grouped onto messages.
+        let attachments = db.query("""
+            SELECT a.id, a.message_id, a.kind, a.file_name FROM attachments a
+            JOIN messages m ON m.id = a.message_id WHERE m.chat_id = ? ORDER BY a.id
+            """, [.int(chatID)]) { stmt in
+            Attachment(id: ChatDatabase.int64(stmt, 0),
+                       messageID: ChatDatabase.int64(stmt, 1),
+                       kind: AttachmentKind(rawValue: ChatDatabase.text(stmt, 2)) ?? .image,
+                       fileName: ChatDatabase.text(stmt, 3))
+        }
+        guard !attachments.isEmpty else { return messages }
+        let byMessage = Dictionary(grouping: attachments, by: \.messageID)
+        for index in messages.indices {
+            messages[index].attachments = byMessage[messages[index].id] ?? []
+        }
+        return messages
     }
 
     /// Most recent message of a chat — used for list previews.
@@ -145,7 +168,60 @@ final class ChatStore: ChatRepositoryProtocol {
 
     func deleteMessage(id: Int64) {
         guard let db = database else { return }
+        let fileNames = db.query("SELECT file_name FROM attachments WHERE message_id = ?",
+                                 [.int(id)]) { stmt in ChatDatabase.text(stmt, 0) }
         db.run("DELETE FROM messages WHERE id = ?", [.int(id)])
+        removeAttachmentFiles(fileNames)
         mutated()
+    }
+
+    // MARK: - Attachments
+
+    private static func attachmentsDirectory() -> URL? {
+        guard let base = try? ProtectedStorage.privateApplicationSupportURL() else { return nil }
+        let dir = base.appendingPathComponent("attachments", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(
+                at: dir, withIntermediateDirectories: true,
+                attributes: [.protectionKey: FileProtectionType.complete])
+        }
+        return dir
+    }
+
+    @discardableResult
+    func appendAttachment(messageID: Int64, kind: AttachmentKind, data: Data) -> Attachment? {
+        guard let db = database, let dir = Self.attachmentsDirectory() else { return nil }
+        let ext = kind == .image ? "jpg" : "wav"
+        let fileName = "\(UUID().uuidString).\(ext)"
+        let url = dir.appendingPathComponent(fileName)
+        do {
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+        } catch {
+            return nil
+        }
+        guard db.run("INSERT INTO attachments (message_id, kind, file_name, created_at) VALUES (?, ?, ?, ?)",
+                     [.int(messageID), .text(kind.rawValue), .text(fileName),
+                      .real(Date().timeIntervalSince1970)]) else {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+        mutated()
+        return Attachment(id: db.lastInsertRowID, messageID: messageID, kind: kind, fileName: fileName)
+    }
+
+    func attachmentURL(_ attachment: Attachment) -> URL? {
+        Self.attachmentsDirectory()?.appendingPathComponent(attachment.fileName)
+    }
+
+    func attachmentData(_ attachment: Attachment) -> Data? {
+        guard let url = attachmentURL(attachment) else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    private func removeAttachmentFiles(_ fileNames: [String]) {
+        guard !fileNames.isEmpty, let dir = Self.attachmentsDirectory() else { return }
+        for name in fileNames {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+        }
     }
 }

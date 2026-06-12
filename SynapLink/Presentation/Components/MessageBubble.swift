@@ -14,16 +14,43 @@ struct MessageBubble: View {
     let role: MessageRole
     let text: String
     var isStreaming = false
+    var attachments: [Attachment] = []
 
     var body: some View {
         HStack {
             if role == .user { Spacer(minLength: 48) }
-            content
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(background)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            VStack(alignment: .leading, spacing: 8) {
+                attachmentViews
+                content
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(background)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             if role == .assistant { Spacer(minLength: 48) }
+        }
+    }
+
+    @ViewBuilder
+    private var attachmentViews: some View {
+        ForEach(attachments) { attachment in
+            switch attachment.kind {
+            case .image:
+                if let url = ChatStore.shared.attachmentURL(attachment),
+                   let image = UIImage(contentsOfFile: url.path) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            case .audio:
+                if let url = ChatStore.shared.attachmentURL(attachment) {
+                    AudioAttachmentView(url: url)
+                        .tint(role == .user ? .white : .accentColor)
+                        .foregroundStyle(role == .user ? .white : .primary)
+                }
+            }
         }
     }
 
@@ -31,6 +58,8 @@ struct MessageBubble: View {
     private var content: some View {
         if text.isEmpty && isStreaming {
             TypingIndicator()
+        } else if text.isEmpty {
+            EmptyView()
         } else if role == .assistant {
             // Block markdown: fenced code with copy button, headings, inline styles.
             MarkdownText(text: isStreaming ? text + " ●" : text)
@@ -74,7 +103,8 @@ struct TypingIndicator: View {
 extension MessageBubble {
     init(message: Message) {
         self.init(role: message.role,
-                  text: message.content)
+                  text: message.content,
+                  attachments: message.attachments)
     }
 }
 

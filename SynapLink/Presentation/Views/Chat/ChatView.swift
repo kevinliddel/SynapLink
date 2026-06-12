@@ -15,7 +15,9 @@ struct ChatView: View {
 
     @State private var session = ChatSession.shared
     @State private var draft = ""
+    @State private var showAttachDialog = false
     @State private var showPhotoPicker = false
+    @State private var showCamera = false
     @State private var photoItem: PhotosPickerItem?
     @State private var pendingImage: Data?
     @State private var showVoiceMode = false
@@ -32,7 +34,7 @@ struct ChatView: View {
                 canSend: session.engineState != .loading,
                 onSend: sendDraft,
                 onStop: { session.stop() },
-                onCamera: { showPhotoPicker = true },
+                onCamera: { showAttachDialog = true },
                 onVoice: { showVoiceMode = true })
         }
         .toolbar {
@@ -48,6 +50,21 @@ struct ChatView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("Add a photo", isPresented: $showAttachDialog) {
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button("Take Photo") { showCamera = true }
+            }
+            Button("Choose from Library") { showPhotoPicker = true }
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker { image in
+                showCamera = false
+                if let image, let jpeg = image.jpegData(compressionQuality: 0.85) {
+                    pendingImage = Self.normalizedJPEG(from: jpeg)
+                }
+            }
+            .ignoresSafeArea()
+        }
         .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) {
             guard let photoItem else { return }
@@ -158,7 +175,11 @@ struct ChatView: View {
                             }
                     }
                     if session.isGenerating {
-                        MessageBubble(role: .assistant, text: session.streamingText, isStreaming: true)
+                        if session.isAnalyzingMedia && session.streamingText.isEmpty {
+                            analyzingIndicator
+                        } else {
+                            MessageBubble(role: .assistant, text: session.streamingText, isStreaming: true)
+                        }
                     }
                     statusBanner
                     // Stable scroll target: always present, always last.
@@ -192,6 +213,24 @@ struct ChatView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Media prefill (encode) takes seconds before the first token — say so.
+    private var analyzingIndicator: some View {
+        HStack {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .symbolEffect(.pulse)
+                Text("Analyzing…")
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            Spacer(minLength: 48)
         }
     }
 
