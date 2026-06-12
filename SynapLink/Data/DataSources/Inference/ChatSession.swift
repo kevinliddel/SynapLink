@@ -23,6 +23,26 @@ enum EngineState: Equatable {
     case failed(message: String)
 }
 
+/// A media input for the CURRENT turn only. Attachment bytes are not
+/// persisted yet (Phase 2 stores them encrypted); history shows a
+/// placeholder label and regenerating a media turn falls back to text.
+struct PendingAttachment {
+    enum Kind {
+        case image
+        case audio
+
+        var placeholder: String {
+            switch self {
+            case .image: return "[Photo]"
+            case .audio: return "[Voice note]"
+            }
+        }
+    }
+
+    let kind: Kind
+    let data: Data
+}
+
 @MainActor
 @Observable
 final class ChatSession {
@@ -30,6 +50,7 @@ final class ChatSession {
     static let shared = ChatSession()
 
     private(set) var engineState: EngineState = .unloaded
+    private(set) var capabilities: EngineCapabilities?
     private(set) var activeChat: Chat?
     private(set) var messages: [Message] = []
     private(set) var streamingText = ""
@@ -108,6 +129,7 @@ final class ChatSession {
         do {
             let caps = try await engine.load(params)
             loadedNCtx = Int(caps.nCtx)
+            capabilities = caps
             engineState = .ready(description: caps.modelDescription)
         } catch {
             engineState = .failed(message: error.localizedDescription)
@@ -117,19 +139,28 @@ final class ChatSession {
     func unloadEngine() async {
         stop()
         await engine.unload()
+        capabilities = nil
         engineState = .unloaded
     }
 
     // MARK: - Turns
 
-    func send(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isGenerating, let chat = activeChat else { return }
+    @ObservationIgnored private var pendingAttachments: [PendingAttachment] = []
+    @ObservationIgnored private var pendingUserText = ""
 
-        if let saved = store.appendMessage(chatID: chat.id, role: .user, content: trimmed) {
+    func send(_ text: String, attachments: [PendingAttachment] = []) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || !attachments.isEmpty,
+              !isGenerating, let chat = activeChat else { return }
+
+        let labels = attachments.map(\.kind.placeholder).joined(separator: " ")
+        let display = [labels, trimmed].filter { !$0.isEmpty }.joined(separator: " ")
+        if let saved = store.appendMessage(chatID: chat.id, role: .user, content: display) {
             messages.append(saved)
         }
-        autoTitleIfNeeded(chat: chat, firstUserText: trimmed)
+        autoTitleIfNeeded(chat: chat, firstUserText: display)
+        pendingAttachments = attachments
+        pendingUserText = trimmed
         generate()
     }
 
@@ -152,6 +183,10 @@ final class ChatSession {
         isGenerating = true
         streamingText = ""
         lastError = nil
+        let attachments = pendingAttachments
+        let userText = pendingUserText
+        pendingAttachments = []
+        pendingUserText = ""
 
         generationTask = Task { [weak self] in
             guard let self else { return }
@@ -161,10 +196,20 @@ final class ChatSession {
                 return
             }
             do {
-                let history = self.trimmedHistory()
+                var history = self.trimmedHistory()
+                // Media turn: the engine replaces one marker per attachment
+                // with the encoded image/audio chunks (mtmd_tokenize), so the
+                // last user message needs marker content — the persisted
+                // placeholder labels stay history-only.
+                if !attachments.isEmpty, let lastIndex = history.lastIndex(where: { $0.role == "user" }) {
+                    let markers = String(repeating: InferenceEngine.mediaMarker, count: attachments.count)
+                    history[lastIndex].content = markers + userText
+                }
                 let prompt = try await self.engine.applyChatTemplate(history)
                 for try await piece in self.engine.generate(
-                    prompt: prompt, maxNewTokens: Int32(self.settings.maxNewTokens)) {
+                    prompt: prompt,
+                    media: attachments.map(\.data),
+                    maxNewTokens: Int32(self.settings.maxNewTokens)) {
                     self.streamingText += piece
                 }
             } catch {

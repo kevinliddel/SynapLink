@@ -2,9 +2,12 @@
 //  ChatView.swift
 //  SynapLink
 //
-//  One conversation: streamed bubbles, stop, regenerate, input bar.
+//  One conversation: streamed bubbles, stop, regenerate, and a
+//  capability-driven input bar (camera/voice appear only when the loaded
+//  model can see/hear).
 //
 
+import PhotosUI
 import SwiftUI
 
 struct ChatView: View {
@@ -12,12 +15,25 @@ struct ChatView: View {
 
     @State private var session = ChatSession.shared
     @State private var draft = ""
-    @FocusState private var inputFocused: Bool
+    @State private var showPhotoPicker = false
+    @State private var photoItem: PhotosPickerItem?
+    @State private var pendingImage: Data?
+    @State private var showVoiceMode = false
 
     var body: some View {
         VStack(spacing: 0) {
             messageList
-            inputBar
+            attachmentChip
+            ChatInputBar(
+                draft: $draft,
+                supportsVision: session.capabilities?.hasVision ?? false,
+                supportsAudio: session.capabilities?.hasAudio ?? false,
+                isGenerating: session.isGenerating,
+                canSend: session.engineState != .loading,
+                onSend: sendDraft,
+                onStop: { session.stop() },
+                onCamera: { showPhotoPicker = true },
+                onVoice: { showVoiceMode = true })
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -32,6 +48,25 @@ struct ChatView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
+        .onChange(of: photoItem) {
+            guard let photoItem else { return }
+            Task {
+                if let raw = try? await photoItem.loadTransferable(type: Data.self) {
+                    pendingImage = Self.normalizedJPEG(from: raw)
+                }
+                self.photoItem = nil
+            }
+        }
+        .fullScreenCover(isPresented: $showVoiceMode) {
+            ImmersiveAudioView(sampleRate: session.capabilities?.audioSampleRate ?? 16000) { wav in
+                showVoiceMode = false
+                if let wav {
+                    session.send(draft, attachments: [.init(kind: .audio, data: wav)])
+                    draft = ""
+                }
+            }
+        }
         .onAppear {
             if session.activeChat?.id != chat.id {
                 session.open(chat: chat)
@@ -45,6 +80,56 @@ struct ChatView: View {
         case .loading: return "loading model…"
         case .failed: return "model unavailable"
         default: return ModelDownloadManager.shared.selectedConfig.rawValue + " · on-device"
+        }
+    }
+
+    /// iPhone photos arrive as HEIC, which the engine's decoder (stb_image)
+    /// can't read — re-encode to JPEG and downscale: the mmproj resizes far
+    /// below 1024px anyway, and smaller inputs cut A13 encode latency.
+    private static func normalizedJPEG(from data: Data, maxDimension: CGFloat = 1024) -> Data? {
+        guard let image = UIImage(data: data) else { return nil }
+        let scale = min(1, maxDimension / max(image.size.width, image.size.height))
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        return resized.jpegData(compressionQuality: 0.85)
+    }
+
+    private func sendDraft() {
+        let text = draft
+        let attachments: [PendingAttachment] =
+            pendingImage.map { [.init(kind: .image, data: $0)] } ?? []
+        draft = ""
+        pendingImage = nil
+        session.send(text, attachments: attachments)
+    }
+
+    // MARK: - Attachment preview
+
+    @ViewBuilder
+    private var attachmentChip: some View {
+        if let pendingImage, let uiImage = UIImage(data: pendingImage) {
+            HStack {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Text("Photo attached")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    self.pendingImage = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Remove photo")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(.bar)
         }
     }
 
@@ -140,45 +225,5 @@ struct ChatView: View {
         .padding(.vertical, 10)
         .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.vertical, 6)
-    }
-
-    // MARK: - Input
-
-    private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Message", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .focused($inputFocused)
-                .disabled(session.isGenerating)
-
-            if session.isGenerating {
-                Button {
-                    session.stop()
-                } label: {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.system(size: 31))
-                        .foregroundStyle(.red)
-                        .symbolEffect(.pulse)
-                }
-            } else {
-                Button {
-                    let text = draft
-                    draft = ""
-                    session.send(text)
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 31))
-                }
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || session.engineState == .loading)
-            }
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.bar)
     }
 }

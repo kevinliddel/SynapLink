@@ -94,3 +94,17 @@ scripts/simulator-smoketest.sh <model.gguf>       # CI-identical headless run
 
 On-device exit gate: download a model from the Model Library, chat for 30
 minutes — no jetsam, no stalls; Settings → Diagnostics → Smoke Test for tok/s.
+
+## Early Phase 2 surface: capability-driven input bar
+
+The input bar adapts to what the loaded model can do (`EngineCapabilities`
+from the mmproj): camera button + green voice circle for multimodal models,
+plain send arrow for text-only ones. Photo attachments are re-encoded
+HEIC→JPEG and downscaled to ≤1024 px (stb_image can't read HEIC; smaller
+inputs cut A13 encode latency). Voice notes record mono LPCM **WAV** at the
+model's sample rate (miniaudio decodes wav/mp3/flac, not AAC) in a
+full-screen immersive recorder. Both flow through the engine's existing
+`mtmd` media path. Not yet done (rest of Phase 2): attachment persistence in
+the encrypted store (history shows `[Photo]`/`[Voice note]` placeholders),
+KV reuse across media turns, and the on-device E2B latency measurements —
+multimodal only activates on ≥6 GB devices.
