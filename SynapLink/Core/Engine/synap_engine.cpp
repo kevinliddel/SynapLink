@@ -168,6 +168,48 @@ const char* synap_engine_system_info(void) {
     return llama_print_system_info();
 }
 
+static std::string trim_copy(const char* text) {
+    std::string s    = text ? text : "";
+    const auto begin = s.find_first_not_of(" \t\n\r");
+    if (begin == std::string::npos) { return ""; }
+    const auto end = s.find_last_not_of(" \t\n\r");
+    return s.substr(begin, end - begin + 1);
+}
+
+/// Gemma 4 turn format: "<|turn>{role}\n{content}<turn|>\n", assistant role
+/// rendered as "model", generation prompt = trailing "<|turn>model\n".
+/// llama.cpp b9596's built-in template detector predates this marker, so
+/// llama_chat_apply_template returns -1 for Gemma 4 GGUFs; this fallback
+/// covers the plain-chat path (tools/thinking channels are out of scope).
+/// BOS is NOT emitted — tokenization with add_special=true adds it, matching
+/// the behavior of llama.cpp's built-in formatters.
+static int32_t apply_gemma4_template(const char* const* roles, const char* const* contents, int32_t n_messages,
+                                     bool add_generation_prompt, char* out_buf, int32_t out_buf_size) {
+    std::string ss;
+    int32_t first = 0;
+    if (strcmp(roles[0], "system") == 0 || strcmp(roles[0], "developer") == 0) {
+        ss += "<|turn>system\n";
+        ss += trim_copy(contents[0]);
+        ss += "<turn|>\n";
+        first = 1;
+    }
+    for (int32_t i = first; i < n_messages; ++i) {
+        std::string role = roles[i];
+        if (role == "assistant") { role = "model"; }
+        ss += "<|turn>" + role + "\n";
+        ss += trim_copy(contents[i]);
+        ss += "<turn|>\n";
+    }
+    if (add_generation_prompt) { ss += "<|turn>model\n"; }
+
+    // Same contract as llama_chat_apply_template: return the total length,
+    // copy what fits — callers retry with a bigger buffer when total >= size.
+    const int32_t total = static_cast<int32_t>(ss.size());
+    const int32_t n     = std::min(total, out_buf_size);
+    memcpy(out_buf, ss.data(), static_cast<size_t>(n));
+    return total;
+}
+
 int32_t synap_engine_apply_chat_template(const SynapEngine* engine, const char* const* roles,
                                          const char* const* contents, int32_t n_messages, bool add_generation_prompt,
                                          char* out_buf, int32_t out_buf_size) {
@@ -179,8 +221,12 @@ int32_t synap_engine_apply_chat_template(const SynapEngine* engine, const char* 
     std::vector<llama_chat_message> messages;
     messages.reserve(static_cast<size_t>(n_messages));
     for (int32_t i = 0; i < n_messages; ++i) { messages.push_back({roles[i], contents[i]}); }
-    return llama_chat_apply_template(tmpl, messages.data(), messages.size(), add_generation_prompt, out_buf,
-                                     out_buf_size);
+    const int32_t rc =
+        llama_chat_apply_template(tmpl, messages.data(), messages.size(), add_generation_prompt, out_buf, out_buf_size);
+    if (rc < 0 && tmpl && strstr(tmpl, "<|turn>") != nullptr) {
+        return apply_gemma4_template(roles, contents, n_messages, add_generation_prompt, out_buf, out_buf_size);
+    }
+    return rc;
 }
 
 // MARK: - §3 Text path: tokenization + KV prefix-reuse prefill

@@ -62,7 +62,12 @@ Device-RAM default: <5 GB → Gemma 3 1B, otherwise E2B.
    conversation: system prompt + sliding window of recent messages that fit
    `0.85 × (n_ctx − maxNewTokens)` (token estimate: 3.5 bytes/token + 10/message).
 2. The model's **built-in chat template** formats the array (`llama_chat_apply_template`
-   via the C bridge — no hand-rolled template strings).
+   via the C bridge — no hand-rolled template strings). One exception: Gemma 4's
+   `<|turn>role\n…<turn|>` format postdates llama.cpp b9596's template detector
+   (it returns -1), so the engine carries a detection-based fallback
+   (`apply_gemma4_template` in synap_engine.cpp) that triggers only when the
+   model's embedded template contains `<|turn>`. Remove it once upstream
+   llama.cpp learns the format (check `src/llama-chat.cpp` on the next pin bump).
 3. The engine's longest-common-prefix prefill gives **KV reuse across turns**:
    only the new suffix is decoded each turn (verify via prefill stats in the
    smoke test: turn 2+ shows `reused > 0`).
