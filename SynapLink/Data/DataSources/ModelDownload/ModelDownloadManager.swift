@@ -43,6 +43,11 @@ final class ModelDownloadManager {
     /// True when the selected model (and its mmproj, if any) is on disk.
     var isAvailable: Bool { states[selectedConfig] == .ready }
 
+    /// One download at a time — used to disable other cards' buttons.
+    var isDownloadActive: Bool {
+        states.values.contains { if case .downloading = $0 { return true } else { return false } }
+    }
+
     @ObservationIgnored private var activeTask: Task<Void, Never>?
     @ObservationIgnored private var activeConfig: ModelConfiguration?
     #if canImport(UIKit)
@@ -51,9 +56,12 @@ final class ModelDownloadManager {
 
     private init() {
         if let saved = UserDefaults.standard.string(forKey: Self.configKey),
-           let config = ModelConfiguration(rawValue: saved) {
+           let config = ModelConfiguration(rawValue: saved),
+           config.isSupportedOnThisDevice {
             selectedConfig = config
         } else {
+            // No selection yet — or a selection this device can't run
+            // (e.g. E2B chosen before RAM gating existed).
             selectedConfig = .defaultConfigForCurrentDevice()
         }
         refreshStates()
@@ -72,6 +80,8 @@ final class ModelDownloadManager {
     func startDownload(_ config: ModelConfiguration) {
         guard activeTask == nil else { return }
         guard states[config] != .ready else { return }
+        // Don't let users burn 4 GB of data on a model the device can't run.
+        guard config.isSupportedOnThisDevice else { return }
 
         activeConfig = config
         states[config] = .downloading(progress: 0)

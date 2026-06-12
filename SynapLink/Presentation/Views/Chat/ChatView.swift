@@ -17,10 +17,20 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             messageList
-            statusBar
             inputBar
         }
-        .navigationTitle(session.activeChat?.title ?? chat.title)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text(session.activeChat?.title ?? chat.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(modelSubtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if session.activeChat?.id != chat.id {
@@ -30,12 +40,23 @@ struct ChatView: View {
         }
     }
 
+    private var modelSubtitle: String {
+        switch session.engineState {
+        case .loading: return "loading model…"
+        case .failed: return "model unavailable"
+        default: return ModelDownloadManager.shared.selectedConfig.rawValue + " · on-device"
+        }
+    }
+
     // MARK: - Messages
 
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 10) {
+                    if session.messages.isEmpty && !session.isGenerating {
+                        emptyHint
+                    }
                     ForEach(session.messages) { message in
                         MessageBubble(message: message)
                             .id(message.id)
@@ -55,6 +76,7 @@ struct ChatView: View {
                         MessageBubble(role: .assistant, text: session.streamingText, isStreaming: true)
                             .id("streaming")
                     }
+                    statusBanner
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -73,32 +95,51 @@ struct ChatView: View {
         }
     }
 
+    private var emptyHint: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "lock.shield")
+                .font(.largeTitle)
+                .foregroundStyle(.tertiary)
+            Text("Ask anything.\nThis conversation never leaves your device.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.top, 60)
+    }
+
     // MARK: - Status
 
     @ViewBuilder
-    private var statusBar: some View {
+    private var statusBanner: some View {
         switch session.engineState {
         case .loading:
-            HStack(spacing: 8) {
-                ProgressView()
-                Text("Loading model…").font(.footnote).foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 6)
+            banner(icon: nil, text: "Loading model — first time takes a few seconds…", color: .secondary)
         case .failed(let message):
-            Label(message, systemImage: "exclamationmark.triangle")
-                .font(.footnote)
-                .foregroundStyle(.red)
-                .padding(.vertical, 6)
-                .padding(.horizontal)
+            banner(icon: "exclamationmark.triangle.fill", text: message, color: .red)
         default:
             if let error = session.lastError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal)
+                banner(icon: "exclamationmark.triangle.fill", text: error, color: .orange)
             }
         }
+    }
+
+    private func banner(icon: String?, text: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            if let icon {
+                Image(systemName: icon)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+            Text(text)
+                .multilineTextAlignment(.leading)
+        }
+        .font(.footnote)
+        .foregroundStyle(color)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.vertical, 6)
     }
 
     // MARK: - Input
@@ -119,8 +160,9 @@ struct ChatView: View {
                     session.stop()
                 } label: {
                     Image(systemName: "stop.circle.fill")
-                        .font(.system(size: 30))
+                        .font(.system(size: 31))
                         .foregroundStyle(.red)
+                        .symbolEffect(.pulse)
                 }
             } else {
                 Button {
@@ -129,9 +171,10 @@ struct ChatView: View {
                     session.send(text)
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 30))
+                        .font(.system(size: 31))
                 }
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || session.engineState == .loading)
             }
         }
         .padding(.horizontal)

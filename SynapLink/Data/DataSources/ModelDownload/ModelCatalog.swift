@@ -62,11 +62,30 @@ enum ModelConfiguration: String, CaseIterable, Identifiable, Sendable {
 
     var supportsMultimodal: Bool { mmprojFilename != nil }
 
+    /// Minimum physical RAM to run this model. E2B weights are ~2.9 GB —
+    /// on the iPhone 11 (4 GB) Metal allocates past the A13's ~2.7 GB
+    /// working-set limit and jetsam kills the app, so it is hard-gated.
+    var requiredRAMGB: Double {
+        switch self {
+        case .gemma4E2B, .gemma4E2BQ40: return 6.0
+        case .gemma3_1B: return 0
+        }
+    }
+
+    /// `physicalMemory` under-reports (a "4 GB" device shows ~3.7 GB), so
+    /// compare with half a GB of slack.
+    var isSupportedOnThisDevice: Bool {
+        let gb = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824.0
+        return gb + 0.5 >= requiredRAMGB
+    }
+
+    var isRecommendedForThisDevice: Bool { self == .defaultConfigForCurrentDevice() }
+
     var deviceRecommendation: String {
         switch self {
-        case .gemma4E2B: return "≥6 GB devices · vision + audio input"
-        case .gemma4E2BQ40: return "≥6 GB devices · faster on older GPUs"
-        case .gemma3_1B: return "4 GB devices (iPhone 11) · text only"
+        case .gemma4E2B: return "Vision + audio input · needs ≥6 GB RAM"
+        case .gemma4E2BQ40: return "Faster on older GPUs · needs ≥6 GB RAM"
+        case .gemma3_1B: return "Text only · runs on every supported device"
         }
     }
 

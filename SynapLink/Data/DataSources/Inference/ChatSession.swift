@@ -12,6 +12,9 @@
 
 import Foundation
 import Observation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum EngineState: Equatable {
     case unloaded
@@ -44,7 +47,25 @@ final class ChatSession {
     private static let bytesPerToken = 3.5
     private static let tokensPerMessageOverhead = 10
 
-    private init() {}
+    private init() {
+        // Memory pressure: drop the KV cache before jetsam drops us. The
+        // next turn re-prefills from scratch — slow but alive.
+        #if canImport(UIKit)
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil, queue: .main
+        ) { _ in
+            Task { @MainActor in
+                ChatSession.shared.handleMemoryWarning()
+            }
+        }
+        #endif
+    }
+
+    private func handleMemoryWarning() {
+        guard !isGenerating else { return }  // mid-decode the cache is live
+        Task { await engine.clearKVCache() }
+    }
 
     // MARK: - Chat lifecycle
 
@@ -70,12 +91,20 @@ final class ChatSession {
 
         engineState = .loading
         let config = ModelDownloadManager.shared.selectedConfig
+        // Hard gate before touching the engine: loading an oversized model
+        // doesn't fail gracefully — Metal over-allocates and jetsam kills
+        // the whole app (observed with E2B on iPhone 11).
+        guard config.isSupportedOnThisDevice else {
+            engineState = .failed(message:
+                "\(config.rawValue) needs ≥\(Int(config.requiredRAMGB)) GB RAM and can't run on this device. Pick a smaller model in the Model Library.")
+            return
+        }
         guard let modelURL = config.modelURL() else {
             engineState = .failed(message: "Model not downloaded. Open the Model Library to download it.")
             return
         }
-        var params = EngineParams(modelPath: modelURL.path)
-        params.mmprojPath = config.mmprojURL()?.path
+        let params = RuntimeProfile.engineParams(
+            modelPath: modelURL.path, mmprojPath: config.mmprojURL()?.path)
         do {
             let caps = try await engine.load(params)
             loadedNCtx = Int(caps.nCtx)

@@ -3,7 +3,7 @@
 //  SynapLink
 //
 //  Model download & storage management (NeuraLink ModelLibrary pattern):
-//  one card per catalog entry, total cache accounting, select-to-use.
+//  one card per catalog entry, RAM gating with clear badges, select-to-use.
 //
 
 import SwiftUI
@@ -18,17 +18,15 @@ struct ModelLibraryView: View {
                     ModelLibraryCard(config: config)
                 }
             } footer: {
-                Text("Models download from Hugging Face once and never leave your device. Inference is fully offline.")
+                Text("Models download once from Hugging Face and never leave your device. All chat runs fully offline.")
             }
 
             Section("Storage") {
-                HStack {
-                    Text("Total model storage")
-                    Spacer()
-                    Text(ByteCountFormatter.string(
-                        fromByteCount: manager.totalCacheBytes, countStyle: .file))
-                        .foregroundStyle(.secondary)
-                }
+                LabeledContent("Total model storage",
+                               value: ByteCountFormatter.string(
+                                   fromByteCount: manager.totalCacheBytes, countStyle: .file))
+                LabeledContent("This device",
+                               value: String(format: "%.0f GB RAM", RuntimeProfile.physicalMemoryGB.rounded()))
             }
         }
         .navigationTitle("Model Library")
@@ -47,88 +45,146 @@ struct ModelLibraryCard: View {
     }
 
     private var isSelected: Bool { manager.selectedConfig == config }
+    private var isSupported: Bool { config.isSupportedOnThisDevice }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             header
             Text(config.deviceRecommendation)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             stateRow
         }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if case .ready = state {
-                selectModel()
-            }
-        }
+        .padding(.vertical, 8)
+        .opacity(isSupported ? 1 : 0.75)
     }
 
+    // MARK: - Header
+
     private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: config.supportsMultimodal ? "sparkles.rectangle.stack" : "text.bubble")
+                .font(.title2)
+                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                .frame(width: 34)
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(config.rawValue).font(.headline)
-                Text("\(config.quantizationLabel) · \(config.estimatedSizeGB, specifier: "%.1f") GB\(config.supportsMultimodal ? " · multimodal" : "")")
+                Text("\(config.quantizationLabel) · \(config.estimatedSizeGB, specifier: "%.1f") GB")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
             Spacer()
-            if isSelected, case .ready = state {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            }
+            badge
         }
     }
 
     @ViewBuilder
+    private var badge: some View {
+        if !isSupported {
+            badgeLabel("Won't run here", color: .red)
+        } else if isSelected, case .ready = state {
+            Label("In use", systemImage: "checkmark.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.green)
+        } else if config.isRecommendedForThisDevice {
+            badgeLabel("Recommended", color: .accentColor)
+        }
+    }
+
+    private func badgeLabel(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.15), in: Capsule())
+            .foregroundStyle(color)
+    }
+
+    // MARK: - State row
+
+    @ViewBuilder
     private var stateRow: some View {
-        switch state {
-        case .notDownloaded:
-            Button("Download") { manager.startDownload(config) }
-                .buttonStyle(.bordered)
-
-        case .downloading(let progress):
-            VStack(alignment: .leading, spacing: 6) {
-                ProgressView(value: progress)
-                HStack {
-                    Text("\(Int(progress * 100))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Pause") { manager.pauseDownload() }
-                        .font(.caption)
+        if !isSupported {
+            unsupportedRow
+        } else {
+            switch state {
+            case .notDownloaded:
+                Button {
+                    manager.startDownload(config)
+                } label: {
+                    Label("Download · \(config.estimatedSizeGB, specifier: "%.1f") GB",
+                          systemImage: "arrow.down.circle")
+                        .frame(maxWidth: .infinity)
                 }
-            }
+                .buttonStyle(.borderedProminent)
+                .disabled(manager.isDownloadActive)
 
-        case .paused(let progress):
-            HStack {
-                ProgressView(value: progress).tint(.orange)
-                Button("Resume") { manager.resumeDownload(config) }
+            case .downloading(let progress):
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView(value: progress)
+                    HStack {
+                        Text("\(Int(progress * 100))% of \(config.estimatedSizeGB, specifier: "%.1f") GB")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Pause") { manager.pauseDownload() }
+                            .font(.caption.weight(.semibold))
+                    }
+                }
+
+            case .paused(let progress):
+                HStack {
+                    ProgressView(value: progress).tint(.orange)
+                    Button("Resume") { manager.resumeDownload(config) }
+                        .font(.caption.weight(.semibold))
+                }
+
+            case .ready:
+                HStack {
+                    if !isSelected {
+                        Button("Use This Model") { selectModel() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    Spacer()
+                    Button("Delete", role: .destructive) {
+                        Task { await manager.deleteModel(config) }
+                    }
                     .font(.caption)
-            }
+                }
 
-        case .ready:
-            HStack {
-                if !isSelected {
-                    Button("Use This Model") { selectModel() }
+            case .failed(let message):
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    Button("Retry") { manager.startDownload(config) }
                         .buttonStyle(.bordered)
                 }
+            }
+        }
+    }
+
+    /// Unsupported models can't be downloaded — but if one is already on
+    /// disk (downloaded before RAM gating existed), offer to reclaim space.
+    @ViewBuilder
+    private var unsupportedRow: some View {
+        if case .ready = state {
+            HStack {
+                Text("Downloaded but unusable on this device")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button("Delete", role: .destructive) {
                     Task { await manager.deleteModel(config) }
                 }
+                .font(.caption.weight(.semibold))
+            }
+        } else {
+            Text("Needs ≥\(Int(config.requiredRAMGB)) GB RAM — this device has \(Int(RuntimeProfile.physicalMemoryGB.rounded())) GB.")
                 .font(.caption)
-            }
-
-        case .failed(let message):
-            VStack(alignment: .leading, spacing: 4) {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                Button("Retry") { manager.startDownload(config) }
-                    .buttonStyle(.bordered)
-            }
+                .foregroundStyle(.secondary)
         }
     }
 

@@ -106,6 +106,21 @@ final class ChatStore: ChatRepositoryProtocol {
         }
     }
 
+    /// Most recent message of a chat — used for list previews.
+    func lastMessage(chatID: Int64) -> Message? {
+        guard let db = database else { return nil }
+        return db.query(
+            "SELECT id, chat_id, role, content, created_at FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+            [.int(chatID)]
+        ) { stmt in
+            Message(id: ChatDatabase.int64(stmt, 0),
+                    chatID: ChatDatabase.int64(stmt, 1),
+                    role: MessageRole(rawValue: ChatDatabase.text(stmt, 2)) ?? .user,
+                    content: ChatDatabase.text(stmt, 3),
+                    createdAt: Date(timeIntervalSince1970: ChatDatabase.double(stmt, 4)))
+        }.first
+    }
+
     @discardableResult
     func appendMessage(chatID: Int64, role: MessageRole, content: String) -> Message? {
         guard let db = database else { return nil }
