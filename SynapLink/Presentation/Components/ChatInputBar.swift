@@ -55,9 +55,16 @@ struct ChatInputBar: View {
 
             trailingButton
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.bar)
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+        .background {
+            // The shape must run under the home indicator, or the safe-area
+            // strip below the footer shows the scroll background through.
+            UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26, style: .continuous)
+                .fill(.bar)
+                .ignoresSafeArea(edges: .bottom)
+        }
     }
 
     @ViewBuilder

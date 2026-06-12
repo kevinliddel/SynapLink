@@ -31,22 +31,15 @@ struct MessageBubble: View {
     private var content: some View {
         if text.isEmpty && isStreaming {
             TypingIndicator()
-        } else {
-            Text(attributed)
+        } else if role == .assistant {
+            // Block markdown: fenced code with copy button, headings, inline styles.
+            MarkdownText(text: isStreaming ? text + " ●" : text)
                 .textSelection(.enabled)
-                .tint(role == .user ? .white : .accentColor)
+        } else {
+            Text(MarkdownText.inline(text))
+                .textSelection(.enabled)
+                .tint(.white)
         }
-    }
-
-    private var attributed: AttributedString {
-        var options = AttributedString.MarkdownParsingOptions()
-        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
-        var result = (try? AttributedString(markdown: text, options: options))
-            ?? AttributedString(text)
-        if isStreaming {
-            result += AttributedString(" ●")
-        }
-        return result
     }
 
     private var background: some ShapeStyle {

@@ -159,22 +159,37 @@ struct ChatView: View {
                     }
                     if session.isGenerating {
                         MessageBubble(role: .assistant, text: session.streamingText, isStreaming: true)
-                            .id("streaming")
                     }
                     statusBanner
+                    // Stable scroll target: always present, always last.
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
             }
+            // Open at the latest message and stay pinned to the bottom while
+            // content grows (streaming) — unless the user scrolls away.
+            .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: session.streamingText) {
-                withAnimation(.linear(duration: 0.1)) {
-                    proxy.scrollTo("streaming", anchor: .bottom)
-                }
+                proxy.scrollTo("bottom", anchor: .bottom)
             }
             .onChange(of: session.messages.count) {
-                if let last = session.messages.last {
-                    proxy.scrollTo(last.id, anchor: .bottom)
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillShowNotification)
+            ) { _ in
+                // Let the keyboard inset land first, then bring the latest
+                // reply back above the keyboard.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
                 }
             }
         }
