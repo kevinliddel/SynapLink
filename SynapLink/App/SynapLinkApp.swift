@@ -9,7 +9,13 @@ import SwiftUI
 struct SynapLinkApp: App {
     var body: some Scene {
         WindowGroup {
-            SmokeTestView()
+            // CI runs the headless benchmark harness directly (see
+            // scripts/simulator-smoketest.sh); users get the chat app.
+            if ProcessInfo.processInfo.arguments.contains("--auto-benchmark") {
+                NavigationStack { SmokeTestView() }
+            } else {
+                ChatListView()
+            }
         }
     }
 }

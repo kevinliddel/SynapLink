@@ -12,21 +12,19 @@ struct SmokeTestView: View {
     @State private var viewModel = SmokeTestViewModel()
 
     var body: some View {
-        NavigationStack {
-            Form {
-                modelSection
-                controlSection
-                if let result = viewModel.result, viewModel.loadState != .unloaded {
-                    resultSection(result)
-                }
-                outputSection
+        Form {
+            modelSection
+            controlSection
+            if let result = viewModel.result, viewModel.loadState != .unloaded {
+                resultSection(result)
             }
-            .navigationTitle("SynapLink Smoke Test")
-            .navigationBarTitleDisplayMode(.inline)
-            .onAppear {
-                viewModel.refreshModels()
-                viewModel.autoRunIfRequested()
-            }
+            outputSection
+        }
+        .navigationTitle("Smoke Test")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            viewModel.refreshModels()
+            viewModel.autoRunIfRequested()
         }
     }
 

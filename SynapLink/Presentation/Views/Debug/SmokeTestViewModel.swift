@@ -82,6 +82,10 @@ final class SmokeTestViewModel {
         result = nil
         output = ""
 
+        // The chat may have the engine loaded already; the benchmark needs a
+        // fresh load to measure load time (and `load` refuses double-loads).
+        await ChatSession.shared.unloadEngine()
+
         var params = EngineParams(modelPath: model.path)
         params.mmprojPath = selectedMMProj?.path
 
