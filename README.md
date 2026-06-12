@@ -38,7 +38,8 @@ Baseline device: **iPhone 11 (A13, 4 GB RAM)**.
 - `scripts/build-llama-xcframework.sh` — builds `Frameworks/llama.xcframework`
   (Metal + libmtmd) from a pinned llama.cpp tag
 - `scripts/test-engine-macos.sh` — desktop functional test of the engine core
-- `docs/PHASE_0.md` — current phase: build + smoke-test instructions
+- `docs/PHASE_0.md` — scaffolding & inference core: build + smoke-test instructions
+- `docs/PHASE_1.md` — text chat MVP: architecture, model catalog, chat pipeline
 
 ## Quick start
 
