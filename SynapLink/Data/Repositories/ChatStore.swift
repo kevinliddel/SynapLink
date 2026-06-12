@@ -40,10 +40,10 @@ final class ChatStore: ChatRepositoryProtocol {
         let sql: String
         var bindings: [SQLiteValue] = []
         if trimmed.isEmpty {
-            sql = "SELECT id, title, created_at, updated_at FROM chats ORDER BY updated_at DESC"
+            sql = "SELECT id, title, created_at, updated_at, auto_titled FROM chats ORDER BY updated_at DESC"
         } else {
             sql = """
-            SELECT DISTINCT c.id, c.title, c.created_at, c.updated_at FROM chats c
+            SELECT DISTINCT c.id, c.title, c.created_at, c.updated_at, c.auto_titled FROM chats c
             LEFT JOIN messages m ON m.chat_id = c.id
             WHERE c.title LIKE '%' || ?1 || '%' COLLATE NOCASE
                OR m.content LIKE '%' || ?1 || '%' COLLATE NOCASE
@@ -55,7 +55,8 @@ final class ChatStore: ChatRepositoryProtocol {
             Chat(id: ChatDatabase.int64(stmt, 0),
                  title: ChatDatabase.text(stmt, 1),
                  createdAt: Date(timeIntervalSince1970: ChatDatabase.double(stmt, 2)),
-                 updatedAt: Date(timeIntervalSince1970: ChatDatabase.double(stmt, 3)))
+                 updatedAt: Date(timeIntervalSince1970: ChatDatabase.double(stmt, 3)),
+                 autoTitled: ChatDatabase.int64(stmt, 4) != 0)
         }
     }
 
@@ -74,6 +75,12 @@ final class ChatStore: ChatRepositoryProtocol {
     func renameChat(id: Int64, title: String) {
         guard let db = database else { return }
         db.run("UPDATE chats SET title = ? WHERE id = ?", [.text(title), .int(id)])
+        mutated()
+    }
+
+    func markChatAutoTitled(id: Int64) {
+        guard let db = database else { return }
+        db.run("UPDATE chats SET auto_titled = 1 WHERE id = ?", [.int(id)])
         mutated()
     }
 

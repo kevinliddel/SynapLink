@@ -230,7 +230,57 @@ final class ChatSession {
             self.streamingText = ""
             self.isGenerating = false
             self.isAnalyzingMedia = false
+
+            await self.generateTitleIfDue(for: chat)
         }
+    }
+
+    // MARK: - Model-generated chat title
+
+    /// Once the conversation has ≥5 messages, ask the model itself for a
+    /// short title (one-shot per chat — the `autoTitled` flag persists).
+    /// The request appends a single instruction turn to the existing
+    /// conversation, so the engine's prefix reuse makes it nearly free.
+    private func generateTitleIfDue(for chat: Chat) async {
+        guard let current = activeChat, current.id == chat.id,
+              !current.autoTitled, messages.count >= 5,
+              !isGenerating, case .ready = engineState else { return }
+
+        var history = trimmedHistory()
+        history.append(ChatMessage(
+            role: "user",
+            content: "Summarize our conversation above as a title of at most six words. " +
+                     "Reply with ONLY the title itself — no quotes, no trailing punctuation."))
+        guard let prompt = try? await engine.applyChatTemplate(history) else { return }
+
+        var raw = ""
+        do {
+            for try await piece in engine.generate(prompt: prompt, maxNewTokens: 16) {
+                raw += piece
+            }
+        } catch {
+            return  // cosmetic feature — never surface errors for it
+        }
+
+        guard let title = Self.cleanTitle(raw), activeChat?.id == chat.id else { return }
+        store.renameChat(id: chat.id, title: title)
+        store.markChatAutoTitled(id: chat.id)
+        activeChat?.title = title
+        activeChat?.autoTitled = true
+    }
+
+    /// First line, stripped of quotes/labels; rejects empty or rambling output.
+    static func cleanTitle(_ raw: String) -> String? {
+        var title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let newline = title.firstIndex(of: "\n") {
+            title = String(title[..<newline])
+        }
+        for prefix in ["Title:", "title:"] where title.hasPrefix(prefix) {
+            title = String(title.dropFirst(prefix.count))
+        }
+        title = title.trimmingCharacters(in: CharacterSet(charactersIn: " \"'“”‘’.!,*#"))
+        guard !title.isEmpty, title.count <= 60 else { return nil }
+        return title
     }
 
     // MARK: - Context-window trimming

@@ -12,6 +12,8 @@ struct Chat: Identifiable, Hashable, Sendable {
     var title: String
     var createdAt: Date
     var updatedAt: Date
+    /// True once the model has produced this chat's title (one-shot).
+    var autoTitled: Bool = false
 }
 
 enum MessageRole: String, Sendable {

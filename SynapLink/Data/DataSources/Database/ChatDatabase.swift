@@ -42,6 +42,8 @@ final class ChatDatabase {
             sqlite3_close(db)
             return nil
         }
+        // Additive column migrations: ALTER fails harmlessly once applied.
+        _ = run("ALTER TABLE chats ADD COLUMN auto_titled INTEGER NOT NULL DEFAULT 0")
         protectFamily()
     }
 

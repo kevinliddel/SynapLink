@@ -18,6 +18,8 @@ protocol ChatRepositoryProtocol: AnyObject {
     func createChat(title: String) -> Chat?
 
     func renameChat(id: Int64, title: String)
+    /// Record that the model has titled this chat (suppresses re-titling).
+    func markChatAutoTitled(id: Int64)
     func deleteChat(id: Int64)
     func touchChat(id: Int64)
 
