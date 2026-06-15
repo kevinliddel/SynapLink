@@ -42,6 +42,8 @@ final class ChatDatabase {
             sqlite3_close(db)
             return nil
         }
+        // Additive column migrations: ALTER fails harmlessly once applied.
+        _ = run("ALTER TABLE chats ADD COLUMN auto_titled INTEGER NOT NULL DEFAULT 0")
         protectFamily()
     }
 
@@ -65,7 +67,15 @@ final class ChatDatabase {
             content TEXT NOT NULL,
             created_at REAL NOT NULL
         );
-        """) && run("CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);")
+        """) && run("CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);") && run("""
+        CREATE TABLE IF NOT EXISTS attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            created_at REAL NOT NULL
+        );
+        """) && run("CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);")
     }
 
     /// The -wal/-shm/-journal siblings appear after first write; re-applying

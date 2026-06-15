@@ -2,8 +2,9 @@
 //  SmokeTestView.swift
 //  SynapLink
 //
-//  Phase 0 smoke-test screen. Side-load GGUF files into the app's Documents
-//  folder via Finder (file sharing is enabled), pick a model, load, benchmark.
+//  Performance test, human edition: pick the installed model (preselected to
+//  the one you chat with), run, and read the verdict in plain language —
+//  with the raw numbers tucked into a details section.
 //
 
 import SwiftUI
@@ -12,152 +13,204 @@ struct SmokeTestView: View {
     @State private var viewModel = SmokeTestViewModel()
 
     var body: some View {
-        Form {
-            modelSection
-            controlSection
-            if let result = viewModel.result, viewModel.loadState != .unloaded {
-                resultSection(result)
+        ScrollView {
+            VStack(spacing: 16) {
+                modelCard
+                runButton
+                if viewModel.isRunning {
+                    progressCard
+                }
+                if let result = viewModel.result, viewModel.stage == .done {
+                    verdictCard(result)
+                    numbersCard(result)
+                    sampleReply(result)
+                }
+                if case .failed(let message) = viewModel.stage {
+                    failureCard(message)
+                }
+                Text("Everything runs on this device — the test never uses the network.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 4)
             }
-            outputSection
+            .padding()
         }
-        .navigationTitle("Smoke Test")
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Performance Test")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            viewModel.refreshModels()
+            viewModel.refreshSources()
             viewModel.autoRunIfRequested()
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Model selection
 
-    private var modelSection: some View {
-        Section("Model (Documents/*.gguf)") {
-            if viewModel.availableModels.isEmpty {
-                Text("No GGUF files found. Copy a model into the app's Documents folder via Finder → iPhone → Files.")
+    private var modelCard: some View {
+        card {
+            if viewModel.sources.isEmpty {
+                Label("No model available — download one in the Model Library first.",
+                      systemImage: "exclamationmark.circle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                Picker("Model", selection: $viewModel.selectedModel) {
-                    Text("None").tag(URL?.none)
-                    ForEach(viewModel.availableModels, id: \.self) { url in
-                        Text(url.lastPathComponent).tag(URL?.some(url))
+                HStack(spacing: 12) {
+                    Image(systemName: "cpu")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(viewModel.selectedSource?.displayName ?? "—")
+                            .font(.headline)
+                        Text(viewModel.selectedSource?.detail ?? "")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                }
-                Picker("mmproj", selection: $viewModel.selectedMMProj) {
-                    Text("None (text-only)").tag(URL?.none)
-                    ForEach(viewModel.availableModels, id: \.self) { url in
-                        Text(url.lastPathComponent).tag(URL?.some(url))
+                    Spacer()
+                    if viewModel.sources.count > 1 {
+                        Menu("Change") {
+                            ForEach(viewModel.sources) { source in
+                                Button(source.displayName) {
+                                    viewModel.selectedSource = source
+                                }
+                            }
+                        }
+                        .font(.callout)
+                        .disabled(viewModel.isRunning)
                     }
-                }
-            }
-            Button("Rescan") { viewModel.refreshModels() }
-        }
-    }
-
-    private var controlSection: some View {
-        Section("Run") {
-            switch viewModel.loadState {
-            case .unloaded:
-                Button("Load Model") {
-                    Task { await viewModel.loadModel() }
-                }
-                .disabled(viewModel.selectedModel == nil)
-            case .loading:
-                HStack {
-                    ProgressView()
-                    Text("Loading…").padding(.leading, 8)
-                }
-            case .loaded(let description):
-                Text(description)
-                    .font(.caption.monospaced())
-                TextField("Prompt", text: $viewModel.prompt, axis: .vertical)
-                if viewModel.isGenerating {
-                    Button("Stop", role: .destructive) { viewModel.stopGeneration() }
-                } else {
-                    Button("Run Benchmark") {
-                        Task { await viewModel.runBenchmark() }
-                    }
-                    Button("Unload", role: .destructive) {
-                        Task { await viewModel.unloadModel() }
-                    }
-                }
-            case .failed(let message):
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-                Button("Try Again") {
-                    Task { await viewModel.loadModel() }
                 }
             }
         }
     }
 
-    private func resultSection(_ result: SmokeTestViewModel.BenchmarkResult) -> some View {
-        Section("Exit gate: ≥7 tok/s, peak <1.8 GB") {
-            row("Load time", String(format: "%.1f s", result.loadSeconds))
-            if let caps = result.capabilities {
-                row("Vision / Audio",
-                    "\(caps.hasVision ? "✓" : "–") / \(caps.hasAudio ? "✓" : "–")")
-                row("Context", "\(caps.nCtx) tok")
+    private var runButton: some View {
+        Button {
+            Task { await viewModel.run() }
+        } label: {
+            Label(viewModel.result == nil ? "Run Performance Test" : "Run Again",
+                  systemImage: "play.fill")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .disabled(viewModel.selectedSource == nil || viewModel.isRunning)
+    }
+
+    // MARK: - Progress
+
+    private var progressCard: some View {
+        card {
+            HStack(spacing: 12) {
+                ProgressView()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(viewModel.stage == .loadingModel ? "Loading the model…" : "Generating a reply…")
+                        .font(.callout.weight(.medium))
+                    Text("Memory in use: \(MemoryFootprint.formatted(viewModel.liveFootprint))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Spacer()
             }
-            if result.stats.decodeTokens > 0 {
-                row("TTFT", String(format: "%.2f s", result.timeToFirstTokenSeconds))
-                row("Prefill", String(format: "%d tok @ %.0f tok/s (%d reused)",
-                                      result.stats.prefillNew,
-                                      result.stats.prefillTokensPerSecond,
-                                      result.stats.prefillReused))
-                gateRow("Decode",
-                        String(format: "%d tok @ %.1f tok/s",
-                               result.stats.decodeTokens,
-                               result.stats.decodeTokensPerSecond),
-                        passed: result.passesTokensPerSecond)
-            }
-            if result.peakFootprint > 0 {
-                gateRow("Peak footprint",
-                        MemoryFootprint.formatted(result.peakFootprint),
-                        passed: result.passesMemory)
-            }
-            if result.minAvailable != .max {
-                row("Min jetsam headroom",
-                    MemoryFootprint.formatted(UInt64(max(0, result.minAvailable))))
-            }
-            row("Live footprint", MemoryFootprint.formatted(viewModel.liveFootprint))
         }
     }
 
-    private var outputSection: some View {
-        Section("Output") {
-            if viewModel.output.isEmpty {
-                Text(viewModel.isGenerating ? "Generating…" : "—")
+    // MARK: - Results
+
+    private func verdictCard(_ result: SmokeTestViewModel.BenchmarkResult) -> some View {
+        card {
+            VStack(spacing: 8) {
+                Text(String(format: "%.1f", result.stats.decodeTokensPerSecond))
+                    .font(.system(size: 44, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                + Text(" tokens/s")
+                    .font(.headline)
                     .foregroundStyle(.secondary)
-            } else {
-                Text(viewModel.output)
-                    .font(.callout)
-                    .textSelection(.enabled)
+
+                Label(result.speedVerdict,
+                      systemImage: result.passesTokensPerSecond ? "checkmark.seal.fill" : "tortoise.fill")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(result.passesTokensPerSecond ? .green : .orange)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func numbersCard(_ result: SmokeTestViewModel.BenchmarkResult) -> some View {
+        card {
+            VStack(spacing: 10) {
+                row("First word appears", String(format: "%.1f s", result.timeToFirstTokenSeconds))
+                row("Model load time", String(format: "%.1f s", result.loadSeconds))
+                VStack(alignment: .leading, spacing: 4) {
+                    row("Peak memory", MemoryFootprint.formatted(result.peakFootprint),
+                        ok: result.passesMemory)
+                    Gauge(value: min(Double(result.peakFootprint), 2_100_000_000), in: 0...2_100_000_000) {
+                        EmptyView()
+                    }
+                    .tint(result.passesMemory ? .green : .red)
+                    Text("Budget: stay under 1.8 GB of the ~2.1 GB system limit")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                if result.minAvailable != .max && result.minAvailable > 0 {
+                    row("Memory headroom left",
+                        MemoryFootprint.formatted(UInt64(max(0, result.minAvailable))))
+                }
             }
         }
     }
 
-    // MARK: - Rows
-
-    private func row(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            Text(value).foregroundStyle(.secondary).font(.callout.monospacedDigit())
+    private func sampleReply(_ result: SmokeTestViewModel.BenchmarkResult) -> some View {
+        card {
+            DisclosureGroup {
+                Text(result.output)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
+                    .textSelection(.enabled)
+            } label: {
+                Label("What the model wrote", systemImage: "text.quote")
+                    .font(.callout.weight(.medium))
+            }
         }
     }
 
-    private func gateRow(_ label: String, _ value: String, passed: Bool) -> some View {
+    private func failureCard(_ message: String) -> some View {
+        card {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.red)
+        }
+    }
+
+    // MARK: - Bits
+
+    private func card(@ViewBuilder _ content: () -> some View) -> some View {
+        VStack(alignment: .leading) { content() }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func row(_ label: String, _ value: String, ok: Bool? = nil) -> some View {
         HStack {
-            Image(systemName: passed ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(passed ? .green : .red)
-            Text(label)
+            if let ok {
+                Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(ok ? .green : .red)
+                    .font(.callout)
+            }
+            Text(label).font(.callout)
             Spacer()
-            Text(value).foregroundStyle(.secondary).font(.callout.monospacedDigit())
+            Text(value)
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
     }
 }
 
 #Preview {
-    SmokeTestView()
+    NavigationStack { SmokeTestView() }
 }

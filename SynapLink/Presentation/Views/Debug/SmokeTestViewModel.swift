@@ -2,23 +2,34 @@
 //  SmokeTestViewModel.swift
 //  SynapLink
 //
-//  Phase 0 exit-gate harness: load a GGUF from Documents (side-loaded via
-//  Finder file sharing), run a fixed benchmark prompt, and report decode
-//  tok/s + peak phys_footprint against the targets (≥7 tok/s, <1.8 GB peak).
+//  Performance test backing state. Benchmarks the models the app actually
+//  has: installed Model Library entries first, with Documents side-loads as
+//  extra sources (that's also how CI injects its tiny test model — see
+//  scripts/simulator-smoketest.sh and autoRunIfRequested()).
 //
 
 import Foundation
 import Observation
 
+/// Something we can benchmark: an installed catalog model or a side-loaded file.
+struct BenchmarkSource: Identifiable, Hashable {
+    let id: String
+    let displayName: String
+    let detail: String
+    let modelPath: String
+    let mmprojPath: String?
+}
+
 @MainActor
 @Observable
 final class SmokeTestViewModel {
 
-    enum LoadState: Equatable {
-        case unloaded
-        case loading
-        case loaded(description: String)
-        case failed(message: String)
+    enum Stage: Equatable {
+        case idle
+        case loadingModel
+        case generating
+        case done
+        case failed(String)
     }
 
     struct BenchmarkResult {
@@ -27,150 +38,141 @@ final class SmokeTestViewModel {
         var stats = GenerationStats()
         var peakFootprint: UInt64 = 0
         var minAvailable: Int = .max
-        var capabilities: EngineCapabilities?
+        var output = ""
 
-        /// Phase 0 exit gate: ≥7 tok/s, peak <1.8 GB.
+        /// Phase 0 exit-gate targets (PLAN.md): ≥7 tok/s, peak <1.8 GB.
         var passesTokensPerSecond: Bool { stats.decodeTokensPerSecond >= 7 }
         var passesMemory: Bool { peakFootprint > 0 && peakFootprint < 1_800_000_000 }
+        var passesAll: Bool { passesTokensPerSecond && passesMemory }
+
+        var speedVerdict: String {
+            let tps = stats.decodeTokensPerSecond
+            if tps >= 15 { return "Feels instant" }
+            if tps >= 7 { return "Comfortable for daily use" }
+            return "Below the smooth-chat target"
+        }
     }
 
-    // Model files discovered in Documents.
-    private(set) var availableModels: [URL] = []
-    var selectedModel: URL?
-    var selectedMMProj: URL?   // optional; nil = text-only smoke test
+    private(set) var sources: [BenchmarkSource] = []
+    var selectedSource: BenchmarkSource?
 
-    private(set) var loadState: LoadState = .unloaded
-    private(set) var isGenerating = false
-    private(set) var output = ""
+    private(set) var stage: Stage = .idle
     private(set) var result: BenchmarkResult?
     private(set) var liveFootprint: UInt64 = 0
 
-    var prompt = "Explain in three sentences why the sky is blue."
-    var maxNewTokens: Int32 = 128
+    var isRunning: Bool { stage == .loadingModel || stage == .generating }
 
-    private let engine = InferenceEngine.shared
-    private var memorySampler: Task<Void, Never>?
+    @ObservationIgnored private let engine = InferenceEngine.shared
+    @ObservationIgnored private var memorySampler: Task<Void, Never>?
 
-    // MARK: - Model discovery
+    private static let benchmarkPrompt = "Explain in three sentences why the sky is blue."
 
-    func refreshModels() {
+    // MARK: - Sources
+
+    /// Installed Model Library entries first (the model the user actually
+    /// chats with is preselected), then any GGUF side-loaded into Documents.
+    func refreshSources() {
+        var found: [BenchmarkSource] = []
+
+        for config in ModelConfiguration.allCases
+        where config.isInstalled && config.isSupportedOnThisDevice {
+            if let url = config.modelURL() {
+                found.append(BenchmarkSource(
+                    id: "installed:\(config.rawValue)",
+                    displayName: config.rawValue,
+                    detail: "\(config.quantizationLabel) · installed",
+                    modelPath: url.path,
+                    mmprojPath: config.mmprojURL()?.path))
+            }
+        }
+
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: docs, includingPropertiesForKeys: nil)) ?? []
-        availableModels = files
+        let files = ((try? FileManager.default.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.pathExtension.lowercased() == "gguf" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-
-        // Sensible auto-pick: first non-mmproj GGUF as model, first mmproj-* as projector.
-        if selectedModel == nil {
-            selectedModel = availableModels.first {
-                !$0.lastPathComponent.lowercased().hasPrefix("mmproj")
-            }
+        let sideMMProj = files.first { $0.lastPathComponent.lowercased().hasPrefix("mmproj") }
+        for file in files where !file.lastPathComponent.lowercased().hasPrefix("mmproj") {
+            found.append(BenchmarkSource(
+                id: "file:\(file.lastPathComponent)",
+                displayName: file.deletingPathExtension().lastPathComponent,
+                detail: "side-loaded file",
+                modelPath: file.path,
+                mmprojPath: sideMMProj?.path))
         }
-        if selectedMMProj == nil {
-            selectedMMProj = availableModels.first {
-                $0.lastPathComponent.lowercased().hasPrefix("mmproj")
-            }
+
+        sources = found
+        if selectedSource == nil || !found.contains(where: { $0.id == selectedSource?.id }) {
+            // Prefer the model the user actually chats with.
+            let current = ModelDownloadManager.shared.selectedConfig
+            selectedSource = found.first { $0.id == "installed:\(current.rawValue)" } ?? found.first
         }
     }
 
-    // MARK: - Lifecycle
+    // MARK: - Run
 
-    func loadModel() async {
-        guard let model = selectedModel, loadState != .loading else { return }
-        loadState = .loading
+    func run() async {
+        guard let source = selectedSource, !isRunning else { return }
+        stage = .loadingModel
         result = nil
-        output = ""
-
-        // The chat may have the engine loaded already; the benchmark needs a
-        // fresh load to measure load time (and `load` refuses double-loads).
-        await ChatSession.shared.unloadEngine()
-
-        var params = EngineParams(modelPath: model.path)
-        params.mmprojPath = selectedMMProj?.path
-
-        let t0 = Date()
-        do {
-            let caps = try await engine.load(params)
-            var r = BenchmarkResult()
-            r.loadSeconds = Date().timeIntervalSince(t0)
-            r.capabilities = caps
-            result = r
-            loadState = .loaded(description: caps.modelDescription)
-        } catch {
-            loadState = .failed(message: error.localizedDescription)
-        }
-    }
-
-    func unloadModel() async {
-        engine.cancel()
-        await engine.unload()
-        loadState = .unloaded
-        result = nil
-        output = ""
-    }
-
-    // MARK: - Benchmark
-
-    func runBenchmark() async {
-        guard case .loaded = loadState, !isGenerating else { return }
-        isGenerating = true
-        output = ""
+        var benchmark = BenchmarkResult()
         startMemorySampling()
 
-        var r = result ?? BenchmarkResult()
-        r.stats = GenerationStats()
-        r.timeToFirstTokenSeconds = 0
-        r.peakFootprint = MemoryFootprint.footprint() ?? 0
-        r.minAvailable = MemoryFootprint.available()
-        result = r
+        // The chat may hold the engine; a fresh load measures real load time.
+        await ChatSession.shared.unloadEngine()
 
         do {
-            let templated = try await engine.applyChatTemplate([
-                ChatMessage(role: "user", content: prompt)
+            let loadStart = Date()
+            let params = RuntimeProfile.engineParams(
+                modelPath: source.modelPath, mmprojPath: source.mmprojPath)
+            _ = try await engine.load(params)
+            benchmark.loadSeconds = Date().timeIntervalSince(loadStart)
+
+            stage = .generating
+            let prompt = try await engine.applyChatTemplate([
+                ChatMessage(role: "user", content: Self.benchmarkPrompt)
             ])
-            let t0 = Date()
+            let genStart = Date()
             var firstToken: Date?
-            for try await piece in engine.generate(prompt: templated, maxNewTokens: maxNewTokens) {
+            for try await piece in engine.generate(prompt: prompt, maxNewTokens: 128) {
                 if firstToken == nil { firstToken = Date() }
-                output += piece
+                benchmark.output += piece
             }
-            var updated = result ?? r
-            updated.timeToFirstTokenSeconds = (firstToken ?? t0).timeIntervalSince(t0)
-            updated.stats = await engine.stats()
-            result = updated
+            benchmark.timeToFirstTokenSeconds = (firstToken ?? genStart).timeIntervalSince(genStart)
+            benchmark.stats = await engine.stats()
+
+            stopMemorySampling(into: &benchmark)
+            result = benchmark
+            stage = benchmark.stats.decodeTokens > 0 ? .done : .failed("The model produced no output.")
         } catch {
-            output += "\n\n⚠️ \(error.localizedDescription)"
+            stopMemorySampling(into: &benchmark)
+            result = benchmark
+            stage = .failed(error.localizedDescription)
         }
 
-        stopMemorySampling()
-        isGenerating = false
-    }
-
-    func stopGeneration() {
-        engine.cancel()
+        // The benchmark's model may differ from the chat's selection; the
+        // chat reloads its own model lazily on the next turn.
+        await engine.unload()
     }
 
     // MARK: - Headless CI mode
 
-    /// `--auto-benchmark` runs load + benchmark hands-free and drops a
-    /// machine-readable verdict into Documents/benchmark-result.json for CI
-    /// to assert on. Performance gates are NOT scored here — CI simulators
-    /// run on CPU; only the device run scores the Phase 0 exit gate.
+    /// `--auto-benchmark` (scripts/simulator-smoketest.sh) runs hands-free
+    /// and drops a verdict into Documents/benchmark-result.json. Functional
+    /// gate only — CI simulators never score performance.
     func autoRunIfRequested() {
         guard ProcessInfo.processInfo.arguments.contains("--auto-benchmark") else { return }
         Task {
-            await loadModel()
-            await runBenchmark()
+            refreshSources()
+            await run()
             writeBenchmarkResultFile()
         }
     }
 
     private func writeBenchmarkResultFile() {
         let status: String
-        switch loadState {
-        case .failed: status = "load_failed"
-        case .loaded where (result?.stats.decodeTokens ?? 0) > 0: status = "ok"
+        switch stage {
+        case .done: status = "ok"
+        case .failed where result?.loadSeconds == 0: status = "load_failed"
         default: status = "generate_failed"
         }
         let payload: [String: Any] = [
@@ -181,7 +183,7 @@ final class SmokeTestViewModel {
             "decodeTokensPerSecond": result?.stats.decodeTokensPerSecond ?? 0,
             "prefillReused": result?.stats.prefillReused ?? 0,
             "peakFootprintBytes": result?.peakFootprint ?? 0,
-            "output": output
+            "output": result?.output ?? ""
         ]
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let url = docs.appendingPathComponent("benchmark-result.json")
@@ -194,25 +196,20 @@ final class SmokeTestViewModel {
 
     private func startMemorySampling() {
         memorySampler?.cancel()
+        liveFootprint = MemoryFootprint.footprint() ?? 0
         memorySampler = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                let footprint = MemoryFootprint.footprint() ?? 0
-                let available = MemoryFootprint.available()
-                self.liveFootprint = footprint
-                if var r = self.result {
-                    r.peakFootprint = max(r.peakFootprint, footprint)
-                    r.minAvailable = min(r.minAvailable, available)
-                    self.result = r
-                }
+                self.liveFootprint = max(self.liveFootprint, MemoryFootprint.footprint() ?? 0)
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
     }
 
-    private func stopMemorySampling() {
+    private func stopMemorySampling(into benchmark: inout BenchmarkResult) {
         memorySampler?.cancel()
         memorySampler = nil
-        liveFootprint = MemoryFootprint.footprint() ?? 0
+        benchmark.peakFootprint = max(liveFootprint, MemoryFootprint.footprint() ?? 0)
+        benchmark.minAvailable = min(benchmark.minAvailable, MemoryFootprint.available())
     }
 }

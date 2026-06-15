@@ -10,7 +10,7 @@ Phase 0 checklist and how to run everything.
 | XCFramework build (Metal + libmtmd; iOS arm64, sim arm64+x86_64, macOS universal) | `scripts/build-llama-xcframework.sh` → `Frameworks/llama.xcframework` |
 | C++ inference engine (load model+mmproj, streamed generate, cancel, KV prefix reuse, media eval) | `SynapLink/Core/Engine/synap_engine.{h,cpp}` |
 | Swift interop (serialized engine owner, `AsyncThrowingStream` tokens) | `SynapLink/Core/Inference/InferenceEngine.swift` |
-| Smoke-test screen (tok/s + peak footprint vs exit gate) | `SynapLink/Features/SmokeTest/` |
+| Performance Test screen (tok/s + peak footprint vs exit gate; benchmarks installed Model Library models, Documents side-loads as extra sources) | `SynapLink/Presentation/Views/Debug/` |
 | Desktop functional test (runs the same engine code on macOS) | `tests/engine-smoke/` + `scripts/test-engine-macos.sh` |
 
 ## Build steps
@@ -27,22 +27,20 @@ xcodebuild -project SynapLink.xcodeproj -scheme SynapLink \
   -destination 'generic/platform=iOS' build
 ```
 
-## Smoke test on iPhone 11 (exit gate)
+## Performance test on device (exit gate)
 
-1. Get a Gemma 4 E2B instruct GGUF (Q4_K_M) and its matching `mmproj-*.gguf`.
-   Verify the SHA256 against the source repo before trusting the file.
-2. Install the app on the phone, then copy both files into the app's
-   **Documents** folder via Finder → iPhone → Files (file sharing is enabled).
-3. Open the app → pick model (+ mmproj) → **Load Model** → **Run Benchmark**.
-4. The results panel scores the exit gate directly:
-   - **Decode ≥ 7 tok/s** (green check)
-   - **Peak footprint < 1.8 GB** (green check)
-   - Also reported: load time, TTFT, prefill tok/s, KV-reuse counts,
-     minimum jetsam headroom (`os_proc_available_memory`).
+1. Download a model in the **Model Library** (or side-load a GGUF into the
+   app's Documents via Finder — side-loads appear as extra sources).
+2. Settings → Diagnostics → **Performance Test** → Run. The model you chat
+   with is preselected.
+3. The verdict scores the exit gate directly:
+   - **Decode ≥ 7 tok/s** ("Comfortable for daily use" and up)
+   - **Peak memory < 1.8 GB** (gauge vs the ~2.1 GB system limit)
+   - Also reported: first-word latency, load time, memory headroom, and the
+     model's sample reply.
 
-Defaults match the PLAN budget: ctx 2048, q8_0 KV + flash attention, full
-Metal offload, 4 threads. Adjust in `EngineParams.swift` for sweeps
-(e.g. Q4_0 vs Q4_K_M weights, KV f16 vs q8_0, ctx 2048 vs 4096).
+Engine parameters come from `RuntimeProfile` (device-RAM tiers; 4 GB =
+ctx 1024 / 2 threads / q4_0 KV). Adjust there for sweeps.
 
 ## Lint & CI
 

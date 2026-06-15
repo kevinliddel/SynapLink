@@ -18,6 +18,8 @@ protocol ChatRepositoryProtocol: AnyObject {
     func createChat(title: String) -> Chat?
 
     func renameChat(id: Int64, title: String)
+    /// Record that the model has titled this chat (suppresses re-titling).
+    func markChatAutoTitled(id: Int64)
     func deleteChat(id: Int64)
     func touchChat(id: Int64)
 
@@ -30,4 +32,16 @@ protocol ChatRepositoryProtocol: AnyObject {
     /// is regenerated).
     func updateMessage(id: Int64, content: String)
     func deleteMessage(id: Int64)
+
+    // MARK: Attachments
+
+    /// Persist media bytes for a message (encrypted-at-rest file + DB row).
+    @discardableResult
+    func appendAttachment(messageID: Int64, kind: AttachmentKind, data: Data) -> Attachment?
+
+    /// Absolute file URL for an attachment's bytes.
+    func attachmentURL(_ attachment: Attachment) -> URL?
+
+    /// Load an attachment's bytes (nil if the file vanished).
+    func attachmentData(_ attachment: Attachment) -> Data?
 }

@@ -5,8 +5,11 @@
 //  the iOS app uses: load, chat-template, two streamed generations (the
 //  second must hit KV prefix reuse), cancel-after-N-pieces, stats, free.
 //
-//  Usage: engine-smoke <model.gguf> [mmproj.gguf]
-//  Exit codes: 0 ok, 1 usage, 2 load failed, 3 generate failed, 4 reuse failed
+//  Usage: engine-smoke <model.gguf> [mmproj.gguf] [image.jpg] [audio.wav]
+//  With mmproj + media files it also runs multimodal turns through the
+//  mtmd path (image and/or audio prefill → streamed reply).
+//  Exit codes: 0 ok, 1 usage, 2 load failed, 3 generate failed,
+//              4 reuse failed, 5 media turn failed
 //
 
 #include "synap_engine.h"
@@ -15,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -49,6 +53,41 @@ std::string templated_prompt(const SynapEngine* engine, const std::vector<std::p
     return std::string(buf.data(), static_cast<size_t>(n));
 }
 
+void print_stats(const SynapEngine* engine, const char* label);
+
+std::vector<uint8_t> read_file(const char* path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::vector<uint8_t>(std::istreambuf_iterator<char>(in), {});
+}
+
+/// One media turn: marker-bearing templated prompt + raw file bytes.
+/// Returns 0 on success, 5 on failure.
+int media_turn(SynapEngine* engine, const char* label, const char* path, const char* question) {
+    printf("\n== %s ==\n", label);
+    const std::vector<uint8_t> bytes = read_file(path);
+    if (bytes.empty()) {
+        fprintf(stderr, "FAIL: cannot read %s\n", path);
+        return 5;
+    }
+    const std::string user = std::string(synap_engine_media_marker()) + question;
+    std::string prompt     = templated_prompt(engine, {
+                                                          {"user", user.c_str()},
+                                                      });
+    if (prompt.empty()) {
+        fprintf(stderr, "FAIL: template for media turn\n");
+        return 5;
+    }
+    SynapMediaInput media = {bytes.data(), bytes.size()};
+    SinkState sink;
+    const int32_t rc = synap_engine_generate(engine, prompt.c_str(), &media, 1, 64, on_piece, &sink);
+    if (rc != 0 || sink.text.empty()) {
+        fprintf(stderr, "FAIL: %s rc=%d pieces=%d\n", label, rc, sink.pieces);
+        return 5;
+    }
+    print_stats(engine, label);
+    return 0;
+}
+
 void print_stats(const SynapEngine* engine, const char* label) {
     SynapGenStats st = {};
     synap_engine_get_stats(engine, &st);
@@ -61,8 +100,11 @@ void print_stats(const SynapEngine* engine, const char* label) {
 } // namespace
 
 int main(int argc, char** argv) {
+    // Line-buffer stdout so crash output isn't lost when redirected to a file.
+    setvbuf(stdout, nullptr, _IOLBF, 0);
+
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <model.gguf> [mmproj.gguf]\n", argv[0]);
+        fprintf(stderr, "usage: %s <model.gguf> [mmproj.gguf] [image] [audio]\n", argv[0]);
         return 1;
     }
 
@@ -72,11 +114,15 @@ int main(int argc, char** argv) {
     params.seed              = 42; // deterministic-ish for a smoke test
 #if defined(__x86_64__)
     // ggml's Metal kernels require an Apple-family GPU; on Intel Macs run CPU-only.
-    params.n_gpu_layers = 0;
+    params.n_gpu_layers   = 0;
+    params.mmproj_use_gpu = false;
 #endif
     // CI escape hatch for runners without a usable Metal device.
     const char* force_cpu = std::getenv("SYNAP_SMOKE_CPU");
-    if (force_cpu && force_cpu[0] == '1') { params.n_gpu_layers = 0; }
+    if (force_cpu && force_cpu[0] == '1') {
+        params.n_gpu_layers   = 0;
+        params.mmproj_use_gpu = false;
+    }
 
     printf("== load ==\n");
     SynapEngine* engine = synap_engine_create(&params);
@@ -144,6 +190,23 @@ int main(int argc, char** argv) {
         return 3;
     }
     printf("\nstopped after %d pieces (asked for 5)\n", s3.pieces);
+
+    // Media turns (engine must have an mmproj loaded; files are optional args)
+    if (argc > 3 && synap_engine_has_vision(engine)) {
+        const int rc4 = media_turn(engine, "turn 4 (image)", argv[3], "Describe this image in one short sentence.");
+        if (rc4 != 0) {
+            synap_engine_free(engine);
+            return rc4;
+        }
+    }
+    if (argc > 4 && synap_engine_has_audio(engine)) {
+        const int rc5 =
+            media_turn(engine, "turn 5 (audio)", argv[4], "What do you hear in this audio clip? Answer briefly.");
+        if (rc5 != 0) {
+            synap_engine_free(engine);
+            return rc5;
+        }
+    }
 
     synap_engine_clear_kv(engine);
     synap_engine_free(engine);

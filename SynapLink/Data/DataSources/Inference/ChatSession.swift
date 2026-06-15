@@ -23,24 +23,20 @@ enum EngineState: Equatable {
     case failed(message: String)
 }
 
-/// A media input for the CURRENT turn only. Attachment bytes are not
-/// persisted yet (Phase 2 stores them encrypted); history shows a
-/// placeholder label and regenerating a media turn falls back to text.
+/// Media captured for the turn being sent; persisted to the encrypted
+/// attachment store by `ChatSession.send`.
 struct PendingAttachment {
-    enum Kind {
-        case image
-        case audio
+    let kind: AttachmentKind
+    let data: Data
+}
 
-        var placeholder: String {
-            switch self {
-            case .image: return "[Photo]"
-            case .audio: return "[Voice note]"
-            }
+extension AttachmentKind {
+    var placeholder: String {
+        switch self {
+        case .image: return "Photo"
+        case .audio: return "Voice note"
         }
     }
-
-    let kind: Kind
-    let data: Data
 }
 
 @MainActor
@@ -55,6 +51,9 @@ final class ChatSession {
     private(set) var messages: [Message] = []
     private(set) var streamingText = ""
     private(set) var isGenerating = false
+    /// True while a media turn is in its encode/prefill stage (no tokens
+    /// yet) — image encode alone takes seconds; the UI shows an affordance.
+    private(set) var isAnalyzingMedia = false
     private(set) var lastError: String?
 
     @ObservationIgnored private let engine = InferenceEngine.shared
@@ -145,22 +144,25 @@ final class ChatSession {
 
     // MARK: - Turns
 
-    @ObservationIgnored private var pendingAttachments: [PendingAttachment] = []
-    @ObservationIgnored private var pendingUserText = ""
-
     func send(_ text: String, attachments: [PendingAttachment] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty,
               !isGenerating, let chat = activeChat else { return }
 
-        let labels = attachments.map(\.kind.placeholder).joined(separator: " ")
-        let display = [labels, trimmed].filter { !$0.isEmpty }.joined(separator: " ")
-        if let saved = store.appendMessage(chatID: chat.id, role: .user, content: display) {
-            messages.append(saved)
+        guard var saved = store.appendMessage(chatID: chat.id, role: .user, content: trimmed) else { return }
+        // Bytes go to the encrypted attachment store; history renders the
+        // real thumbnail/player from there, and regenerate can re-send them.
+        for attachment in attachments {
+            if let row = store.appendAttachment(
+                messageID: saved.id, kind: attachment.kind, data: attachment.data) {
+                saved.attachments.append(row)
+            }
         }
-        autoTitleIfNeeded(chat: chat, firstUserText: display)
-        pendingAttachments = attachments
-        pendingUserText = trimmed
+        messages.append(saved)
+        autoTitleIfNeeded(chat: chat,
+                          firstUserText: trimmed.isEmpty
+                              ? attachments.map(\.kind.placeholder).joined(separator: " ")
+                              : trimmed)
         generate()
     }
 
@@ -183,33 +185,36 @@ final class ChatSession {
         isGenerating = true
         streamingText = ""
         lastError = nil
-        let attachments = pendingAttachments
-        let userText = pendingUserText
-        pendingAttachments = []
-        pendingUserText = ""
+
+        // The current turn's media comes from the last user message's STORED
+        // attachments — the same path serves fresh sends and regenerates.
+        let lastUser = messages.last(where: { $0.role == .user })
+        let mediaData = lastUser?.attachments.compactMap { store.attachmentData($0) } ?? []
+        isAnalyzingMedia = !mediaData.isEmpty
 
         generationTask = Task { [weak self] in
             guard let self else { return }
             await self.ensureEngineLoaded()
             guard case .ready = self.engineState else {
                 self.isGenerating = false
+                self.isAnalyzingMedia = false
                 return
             }
             do {
                 var history = self.trimmedHistory()
                 // Media turn: the engine replaces one marker per attachment
-                // with the encoded image/audio chunks (mtmd_tokenize), so the
-                // last user message needs marker content — the persisted
-                // placeholder labels stay history-only.
-                if !attachments.isEmpty, let lastIndex = history.lastIndex(where: { $0.role == "user" }) {
-                    let markers = String(repeating: InferenceEngine.mediaMarker, count: attachments.count)
-                    history[lastIndex].content = markers + userText
+                // with encoded image/audio chunks (mtmd_tokenize); markers
+                // exist only in the prompt, never in persisted content.
+                if !mediaData.isEmpty, let lastIndex = history.lastIndex(where: { $0.role == "user" }) {
+                    let markers = String(repeating: InferenceEngine.mediaMarker, count: mediaData.count)
+                    history[lastIndex].content = markers + (lastUser?.content ?? "")
                 }
                 let prompt = try await self.engine.applyChatTemplate(history)
                 for try await piece in self.engine.generate(
                     prompt: prompt,
-                    media: attachments.map(\.data),
+                    media: mediaData,
                     maxNewTokens: Int32(self.settings.maxNewTokens)) {
+                    self.isAnalyzingMedia = false
                     self.streamingText += piece
                 }
             } catch {
@@ -224,7 +229,58 @@ final class ChatSession {
             }
             self.streamingText = ""
             self.isGenerating = false
+            self.isAnalyzingMedia = false
+
+            await self.generateTitleIfDue(for: chat)
         }
+    }
+
+    // MARK: - Model-generated chat title
+
+    /// Once the conversation has ≥5 messages, ask the model itself for a
+    /// short title (one-shot per chat — the `autoTitled` flag persists).
+    /// The request appends a single instruction turn to the existing
+    /// conversation, so the engine's prefix reuse makes it nearly free.
+    private func generateTitleIfDue(for chat: Chat) async {
+        guard let current = activeChat, current.id == chat.id,
+              !current.autoTitled, messages.count >= 5,
+              !isGenerating, case .ready = engineState else { return }
+
+        var history = trimmedHistory()
+        history.append(ChatMessage(
+            role: "user",
+            content: "Summarize our conversation above as a title of at most six words. " +
+                     "Reply with ONLY the title itself — no quotes, no trailing punctuation."))
+        guard let prompt = try? await engine.applyChatTemplate(history) else { return }
+
+        var raw = ""
+        do {
+            for try await piece in engine.generate(prompt: prompt, maxNewTokens: 16) {
+                raw += piece
+            }
+        } catch {
+            return  // cosmetic feature — never surface errors for it
+        }
+
+        guard let title = Self.cleanTitle(raw), activeChat?.id == chat.id else { return }
+        store.renameChat(id: chat.id, title: title)
+        store.markChatAutoTitled(id: chat.id)
+        activeChat?.title = title
+        activeChat?.autoTitled = true
+    }
+
+    /// First line, stripped of quotes/labels; rejects empty or rambling output.
+    static func cleanTitle(_ raw: String) -> String? {
+        var title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let newline = title.firstIndex(of: "\n") {
+            title = String(title[..<newline])
+        }
+        for prefix in ["Title:", "title:"] where title.hasPrefix(prefix) {
+            title = String(title.dropFirst(prefix.count))
+        }
+        title = title.trimmingCharacters(in: CharacterSet(charactersIn: " \"'“”‘’.!,*#"))
+        guard !title.isEmpty, title.count <= 60 else { return nil }
+        return title
     }
 
     // MARK: - Context-window trimming

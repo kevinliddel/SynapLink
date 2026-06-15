@@ -12,6 +12,8 @@ struct Chat: Identifiable, Hashable, Sendable {
     var title: String
     var createdAt: Date
     var updatedAt: Date
+    /// True once the model has produced this chat's title (one-shot).
+    var autoTitled: Bool = false
 }
 
 enum MessageRole: String, Sendable {
@@ -26,4 +28,19 @@ struct Message: Identifiable, Equatable, Sendable {
     var role: MessageRole
     var content: String
     var createdAt: Date
+    var attachments: [Attachment] = []
+}
+
+enum AttachmentKind: String, Sendable {
+    case image
+    case audio
+}
+
+/// A media file tied to a message. Bytes live as files in the protected
+/// attachments directory; the DB row stores the relative file name.
+struct Attachment: Identifiable, Equatable, Sendable {
+    var id: Int64
+    var messageID: Int64
+    var kind: AttachmentKind
+    var fileName: String
 }

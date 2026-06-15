@@ -40,6 +40,7 @@ Baseline device: **iPhone 11 (A13, 4 GB RAM)**.
 - `scripts/test-engine-macos.sh` — desktop functional test of the engine core
 - `docs/PHASE_0.md` — scaffolding & inference core: build + smoke-test instructions
 - `docs/PHASE_1.md` — text chat MVP: architecture, model catalog, chat pipeline
+- `docs/PHASE_2.md` — multimodal input: attachments, capture, media validation
 
 ## Quick start
 
