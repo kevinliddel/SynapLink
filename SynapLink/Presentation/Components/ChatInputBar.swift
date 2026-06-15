@@ -19,6 +19,7 @@ struct ChatInputBar: View {
     let supportsAudio: Bool
     let isGenerating: Bool
     let canSend: Bool
+    var hasAttachment: Bool = false
 
     var onSend: () -> Void
     var onStop: () -> Void
@@ -30,6 +31,9 @@ struct ChatInputBar: View {
     private var hasDraft: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+
+    /// A turn can be sent with text, an attachment, or both.
+    private var canSubmit: Bool { hasDraft || hasAttachment }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -72,9 +76,9 @@ struct ChatInputBar: View {
         if isGenerating {
             circleButton(systemImage: "stop.fill", background: .red, action: onStop)
                 .accessibilityLabel("Stop generating")
-        } else if hasDraft || !supportsAudio {
+        } else if canSubmit || !supportsAudio {
             circleButton(systemImage: "arrow.up", background: Color.accentColor, action: onSend)
-                .disabled(!hasDraft || !canSend)
+                .disabled(!canSubmit || !canSend)
                 .accessibilityLabel("Send")
         } else {
             circleButton(systemImage: "waveform", background: .green, action: onVoice)

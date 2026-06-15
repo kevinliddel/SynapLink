@@ -9,6 +9,8 @@
 #pragma once
 
 #include "synap_engine.h"
+#include "synap_whisper.h"
+#include "synap_sd.h"
 
 #if __has_include(<os/proc.h>)
 #include <os/proc.h> // os_proc_available_memory() — jetsam headroom (iOS only)

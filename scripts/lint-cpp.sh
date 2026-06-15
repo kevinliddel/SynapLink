@@ -15,8 +15,14 @@ FILES=(
     SynapLink/Core/Engine/synap_engine.h
     SynapLink/Core/Engine/synap_engine.cpp
     SynapLink/Core/Engine/synap_engine_internal.hpp
+    SynapLink/Core/Engine/synap_whisper.h
+    SynapLink/Core/Engine/synap_whisper.cpp
+    SynapLink/Core/Engine/synap_sd.h
+    SynapLink/Core/Engine/synap_sd.cpp
     SynapLink/Core/Engine/SynapLink-Bridging-Header.h
     tests/engine-smoke/main.cpp
+    tests/whisper-smoke/main.cpp
+    tests/sd-smoke/main.cpp
 )
 
 echo "== clang-format =="

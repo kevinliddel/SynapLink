@@ -2,11 +2,10 @@
 //  MarkdownText.swift
 //  SynapLink
 //
-//  Block-level markdown for assistant replies: fenced ``` code blocks render
-//  as monospaced cards with a copy button, #/##/### headings get heading
-//  fonts, and everything else keeps inline markdown (bold, italics, `code`,
-//  links). An unterminated fence is treated as an open code block so
-//  streamed code renders live while the model is still typing it.
+//  Block-level markdown for a FINISHED assistant reply (the streaming path is
+//  StreamingText). Both share the same typed chunks (StreamChunk) and renderer
+//  (StreamChunkView): fenced ``` code as monospaced cards with a copy button,
+//  #/##/### headings, inline styles (bold, italics, `code`, links).
 //
 
 import SwiftUI
@@ -16,93 +15,10 @@ struct MarkdownText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Self.parse(text)) { block in
-                switch block.kind {
-                case .code(let language, let code):
-                    CodeBlockView(language: language, code: code)
-                case .heading(let level, let content):
-                    Text(Self.inline(content))
-                        .font(headingFont(level))
-                case .paragraph(let content):
-                    Text(Self.inline(content))
-                }
+            ForEach(StreamChunkParser.parse(text)) { chunk in
+                StreamChunkView(chunk: chunk).equatable()
             }
         }
-    }
-
-    private func headingFont(_ level: Int) -> Font {
-        switch level {
-        case 1: return .title2.weight(.bold)
-        case 2: return .title3.weight(.semibold)
-        default: return .headline
-        }
-    }
-
-    // MARK: - Parsing
-
-    static func parse(_ text: String) -> [MarkdownBlock] {
-        var blocks: [MarkdownBlock] = []
-        var paragraph: [String] = []
-        var codeLines: [String] = []
-        var codeLanguage: String?
-        var inCode = false
-
-        func flushParagraph() {
-            let joined = paragraph.joined(separator: "\n")
-            if !joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                blocks.append(MarkdownBlock(id: blocks.count, kind: .paragraph(joined)))
-            }
-            paragraph = []
-        }
-
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.hasPrefix("```") {
-                if inCode {
-                    blocks.append(MarkdownBlock(id: blocks.count,
-                                        kind: .code(language: codeLanguage,
-                                                    codeLines.joined(separator: "\n"))))
-                    codeLines = []
-                    codeLanguage = nil
-                    inCode = false
-                } else {
-                    flushParagraph()
-                    let lang = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
-                    codeLanguage = lang.isEmpty ? nil : lang
-                    inCode = true
-                }
-                continue
-            }
-
-            if inCode {
-                codeLines.append(String(line))
-            } else if let heading = headingLine(trimmed) {
-                flushParagraph()
-                blocks.append(MarkdownBlock(id: blocks.count,
-                                    kind: .heading(level: heading.level, heading.text)))
-            } else {
-                paragraph.append(String(line))
-            }
-        }
-
-        // Streaming: an open fence renders as a live code block.
-        if inCode {
-            blocks.append(MarkdownBlock(id: blocks.count,
-                                kind: .code(language: codeLanguage,
-                                            codeLines.joined(separator: "\n"))))
-        }
-        flushParagraph()
-        return blocks
-    }
-
-    private static func headingLine(_ line: String) -> (level: Int, text: String)? {
-        guard line.hasPrefix("#") else { return nil }
-        let hashes = line.prefix(while: { $0 == "#" }).count
-        guard hashes <= 6 else { return nil }
-        let rest = line.dropFirst(hashes)
-        guard rest.first == " " else { return nil }
-        return (hashes, rest.trimmingCharacters(in: .whitespaces))
     }
 
     static func inline(_ text: String) -> AttributedString {
@@ -111,18 +27,6 @@ struct MarkdownText: View {
         return (try? AttributedString(markdown: text, options: options))
             ?? AttributedString(text)
     }
-}
-
-/// One rendered block of a markdown message.
-struct MarkdownBlock: Identifiable {
-    enum Kind {
-        case paragraph(String)
-        case heading(level: Int, String)
-        case code(language: String?, String)
-    }
-
-    let id: Int
-    let kind: Kind
 }
 
 // MARK: - Code block card
@@ -186,10 +90,7 @@ struct CodeBlockView: View {
         ```swift
         func quicksort<T: Comparable>(_ array: [T]) -> [T] {
             guard array.count > 1 else { return array }
-            let pivot = array[array.count / 2]
-            return quicksort(array.filter { $0 < pivot })
-                 + array.filter { $0 == pivot }
-                 + quicksort(array.filter { $0 > pivot })
+            return array
         }
         ```
 

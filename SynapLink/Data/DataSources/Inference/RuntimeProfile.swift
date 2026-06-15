@@ -47,4 +47,58 @@ enum RuntimeProfile {
         params.nThreads = min(params.nThreads, Int32(ProcessInfo.processInfo.processorCount))
         return params
     }
+
+    // MARK: - Specialists (whisper ASR, SmolVLM vision)
+
+    /// Specialists run while the main chat model is also resident. On the
+    /// simulator the GPU path is emulated/absent (and CLIP-on-Metal crashes
+    /// on non-Apple GPUs); device specialists use Metal.
+    static var specialistUsesGPU: Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        return true
+        #endif
+    }
+
+    static var specialistThreads: Int32 {
+        Int32(min(2, ProcessInfo.processInfo.processorCount))
+    }
+
+    /// Image-generation (stable-diffusion.cpp) tunables per RAM tier. The
+    /// 4 GB tier is deliberately experimental: small canvas keeps the
+    /// diffusion working set under the jetsam ceiling, and EULER_A at a modest
+    /// step count is the quality/speed compromise on the A13. Bigger devices
+    /// get a full 512² canvas.
+    static var imageGenSettings: ImageGenSettings {
+        let eulerAncestral: Int32 = 1
+        switch physicalMemoryGB {
+        case ..<5.0:
+            return ImageGenSettings(width: 384, height: 384, steps: 16,
+                                    cfgScale: 7.0, sampleMethod: eulerAncestral)
+        case ..<7.0:
+            return ImageGenSettings(width: 512, height: 512, steps: 20,
+                                    cfgScale: 7.0, sampleMethod: eulerAncestral)
+        default:
+            return ImageGenSettings(width: 512, height: 512, steps: 28,
+                                    cfgScale: 7.5, sampleMethod: eulerAncestral)
+        }
+    }
+
+    /// Vision specialist (SmolVLM) engine params: small context — it captions
+    /// one image per call, no long history.
+    static func visionEngineParams(modelPath: String, mmprojPath: String?) -> EngineParams {
+        var params = EngineParams(modelPath: modelPath)
+        params.mmprojPath = mmprojPath
+        params.nCtx = 1024
+        params.nThreads = specialistThreads
+        params.kvTypeK = .f16
+        params.kvTypeV = .f16
+        params.flashAttention = .disabled  // tiny model; avoids the quant-KV+FA coupling
+        #if targetEnvironment(simulator)
+        params.nGPULayers = 0
+        params.mmprojUseGPU = false
+        #endif
+        return params
+    }
 }

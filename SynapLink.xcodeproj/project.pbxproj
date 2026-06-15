@@ -10,6 +10,10 @@
 		AA0000000000000000000031 /* llama.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000030 /* llama.xcframework */; };
 		AA0000000000000000000032 /* llama.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000030 /* llama.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		AA0000000000000000000062 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000061 /* Hub */; };
+		AA0000000000000000000071 /* whisper.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000070 /* whisper.xcframework */; };
+		AA0000000000000000000072 /* whisper.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000070 /* whisper.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		AA0000000000000000000081 /* sd.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000080 /* sd.xcframework */; };
+		AA0000000000000000000082 /* sd.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000080 /* sd.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -20,6 +24,8 @@
 			dstSubfolderSpec = 10;
 			files = (
 				AA0000000000000000000032 /* llama.xcframework in Embed Frameworks */,
+				AA0000000000000000000072 /* whisper.xcframework in Embed Frameworks */,
+				AA0000000000000000000082 /* sd.xcframework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -29,6 +35,8 @@
 /* Begin PBXFileReference section */
 		AA0000000000000000000020 /* SynapLink.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SynapLink.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000030 /* llama.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = llama.xcframework; path = Frameworks/llama.xcframework; sourceTree = "<group>"; };
+		AA0000000000000000000070 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = whisper.xcframework; path = Frameworks/whisper.xcframework; sourceTree = "<group>"; };
+		AA0000000000000000000080 /* sd.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = sd.xcframework; path = Frameworks/sd.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -45,6 +53,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				AA0000000000000000000031 /* llama.xcframework in Frameworks */,
+				AA0000000000000000000071 /* whisper.xcframework in Frameworks */,
+				AA0000000000000000000081 /* sd.xcframework in Frameworks */,
 				AA0000000000000000000062 /* Hub in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -73,6 +83,8 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000030 /* llama.xcframework */,
+				AA0000000000000000000070 /* whisper.xcframework */,
+				AA0000000000000000000080 /* sd.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
