@@ -32,6 +32,7 @@ struct ChatView: View {
                 supportsAudio: session.canSendAudio,
                 isGenerating: session.isGenerating,
                 canSend: session.engineState != .loading,
+                hasAttachment: pendingImage != nil,
                 onSend: sendDraft,
                 onStop: { session.stop() },
                 onCamera: { showAttachDialog = true },
