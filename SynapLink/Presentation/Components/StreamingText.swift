@@ -19,27 +19,21 @@ struct StreamingText: View {
     let fullText: String
 
     @State private var typewriter = Typewriter()
-    @State private var cursorVisible = true
+
+    /// Live typed chunks of the smoothly-revealed prefix: code/headings/markdown
+    /// render in place as they stream, not only once the reply is done.
+    private var chunks: [StreamChunk] { StreamChunkParser.parse(typewriter.shown) }
 
     var body: some View {
-        (Text(typewriter.shown)
-            + Text("▌").foregroundColor(cursorVisible ? .accentColor : .clear))
-            .font(.callout)
-            .animation(.easeInOut(duration: 0.25), value: cursorVisible)
-            .onAppear {
-                typewriter.update(fullText)
-                blink()
-            }
-            .onChange(of: fullText) { typewriter.update(fullText) }
-    }
-
-    private func blink() {
-        Task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(550))
-                cursorVisible.toggle()
+        VStack(alignment: .leading, spacing: 8) {
+            let chunks = chunks
+            ForEach(chunks) { chunk in
+                StreamChunkView(chunk: chunk, showCursor: chunk.id == chunks.last?.id)
+                    .equatable()
             }
         }
+        .onAppear { typewriter.update(fullText) }
+        .onChange(of: fullText) { typewriter.update(fullText) }
     }
 }
 
