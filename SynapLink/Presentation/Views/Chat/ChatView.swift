@@ -50,11 +50,10 @@ struct ChatView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog("Add a photo", isPresented: $showAttachDialog) {
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button("Take Photo") { showCamera = true }
-            }
-            Button("Choose from Library") { showPhotoPicker = true }
+        .sheet(isPresented: $showAttachDialog) {
+            AttachmentSheet(
+                onCamera: { presentAfterSheet { showCamera = true } },
+                onLibrary: { presentAfterSheet { showPhotoPicker = true } })
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { image in
@@ -110,6 +109,12 @@ struct ChatView: View {
         let renderer = UIGraphicsImageRenderer(size: size)
         let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
         return resized.jpegData(compressionQuality: 0.85)
+    }
+
+    /// Presenting a picker straight from the attachment sheet's dismissal
+    /// races SwiftUI's sheet machinery; let the sheet finish closing first.
+    private func presentAfterSheet(_ action: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: action)
     }
 
     private func sendDraft() {

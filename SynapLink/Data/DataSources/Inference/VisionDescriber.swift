@@ -31,8 +31,22 @@ final class VisionDescriber: @unchecked Sendable {
     /// Its own engine instance — coexists with InferenceEngine.shared.
     private let engine = InferenceEngine(label: "com.dedicatus.synaplink.vision")
 
-    private static let describePrompt =
-        "Describe this image in detail: objects, people, text, setting, and notable details."
+    private static let describePrompt = """
+    Look at this image and describe it thoroughly in 4 to 6 complete sentences. \
+    Cover: the main subject and what is happening; people (appearance, clothing, \
+    expressions, what they are doing); any visible text read word for word; \
+    colors, lighting, and mood; the setting or background; and any small or \
+    unusual details worth noting. Be specific and concrete.
+    """
+
+    private static func focusedPrompt(_ question: String) -> String {
+        """
+        Look at this image carefully. First describe what you see in detail — \
+        the main subject, people, any visible text, colors, and setting. Then, \
+        using only what is visible, answer this question: \(question) \
+        Write several complete sentences.
+        """
+    }
 
     private init() {}
 
@@ -53,7 +67,7 @@ final class VisionDescriber: @unchecked Sendable {
         defer { Task { await engine.unload() } }
 
         let question = userQuestion?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let ask = (question?.isEmpty == false) ? question! : Self.describePrompt
+        let ask = (question?.isEmpty == false) ? Self.focusedPrompt(question!) : Self.describePrompt
         let userContent = InferenceEngine.mediaMarker + ask
 
         do {
@@ -62,7 +76,7 @@ final class VisionDescriber: @unchecked Sendable {
             ])
             var description = ""
             for try await piece in engine.generate(
-                prompt: prompt, media: [imageData], maxNewTokens: 200) {
+                prompt: prompt, media: [imageData], maxNewTokens: 384) {
                 description += piece
             }
             let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
