@@ -35,6 +35,8 @@ struct SmokeTestView: View {
             }
             .padding()
         }
+        .scrollIndicators(.hidden)
+        .synapTabBarInset()
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Performance Test")
         .navigationBarTitleDisplayMode(.inline)

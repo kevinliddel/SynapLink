@@ -2,10 +2,10 @@
 //  HomeView.swift
 //  SynapLink
 //
-//  Landing tab: first-run model setup, then the primary actions —
-//  Start a chat and Create an image — plus a snapshot of what's installed.
-//  Image creation is a first-class action here (not buried in chat), so
-//  "make me an image" goes to the generator instead of the text model.
+//  Landing tab: a greeting, a prompt, and a card grid of the primary actions
+//  (Chat, Create Image) — the screenshot-style home. The toolbar keeps the
+//  profile icon (left) and history (right). Image creation is a first-class
+//  card so "make me an image" goes to the generator, not the text model.
 //
 
 import SwiftUI
@@ -18,23 +18,34 @@ struct HomeView: View {
     @State private var showImageGen = false
     @State private var showHistory = false
 
+    // Phase 4 will pull the real profile name; placeholder for now.
+    private let userName = "User"
+
     private var hasModel: Bool { downloadManager.isAvailable }
+    private var hasImageGen: Bool { specialists.isInstalled(.imageGen) }
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 16),
+        GridItem(.flexible(), spacing: 16)
+    ]
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
-                    hero
-                    if hasModel {
-                        actions
-                        statusCard
-                    } else {
-                        setupCard
-                    }
+                VStack(alignment: .leading, spacing: 24) {
+                    greeting
+                    Text("How may I help\nyou today?")
+                        .font(.largeTitle.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    cards
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.top, 8)
             }
-            .navigationTitle("SynapLink")
+            .scrollIndicators(.hidden)
+            .synapTabBarInset()
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -77,112 +88,38 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Greeting
 
-    private var hero: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "brain.head.profile")
-                .font(.system(size: 52))
-                .foregroundStyle(Color.accentColor.gradient)
-                .padding(.top, 12)
-            Text("Your private AI")
+    private var greeting: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Hello,")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            Text(userName)
                 .font(.title.weight(.bold))
-            Text("Everything runs on this device. No cloud, no account, no network.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.bottom, 4)
     }
 
-    private var actions: some View {
-        VStack(spacing: 12) {
-            actionCard(title: "Start a Chat", subtitle: "Ask anything, offline",
-                       icon: "bubble.left.and.bubble.right.fill", tint: .accentColor) {
-                router.openNewChat()
-            }
-            if specialists.isInstalled(.imageGen) {
-                actionCard(title: "Create an Image", subtitle: "Generate art from a text prompt",
-                           icon: "wand.and.stars", tint: .purple) {
-                    showImageGen = true
+    // MARK: - Cards
+
+    @ViewBuilder
+    private var cards: some View {
+        LazyVGrid(columns: columns, spacing: 16) {
+            if hasModel {
+                HomeCard(title: "Chat", icon: "bubble.left.fill", tint: .blue) {
+                    router.openNewChat()
+                }
+                if hasImageGen {
+                    HomeCard(title: "Create an image", icon: "photo.fill", tint: .teal) {
+                        showImageGen = true
+                    }
+                }
+            } else {
+                HomeCard(title: "Set up a model", icon: "arrow.down.circle.fill", tint: .blue) {
+                    showModelLibrary = true
                 }
             }
         }
-    }
-
-    private func actionCard(title: String, subtitle: String, icon: String, tint: Color,
-                            action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundStyle(.white)
-                    .frame(width: 46, height: 46)
-                    .background(tint.gradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.headline)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var statusCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("On this device").font(.subheadline.weight(.semibold))
-            row(icon: "cpu", label: "Chat model", value: downloadManager.selectedConfig.rawValue)
-            ForEach(SpecialistModel.allCases) { model in
-                if specialists.isInstalled(model) {
-                    row(icon: model.iconName, label: model.rawValue, value: "Ready")
-                }
-            }
-            Button("Manage models") { router.tab = .settings }
-                .font(.caption.weight(.medium))
-                .padding(.top, 2)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func row(icon: String, label: String, value: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon).foregroundStyle(.secondary).frame(width: 22)
-            Text(label).font(.callout)
-            Spacer()
-            Text(value).font(.callout).foregroundStyle(.secondary)
-        }
-    }
-
-    private var setupCard: some View {
-        VStack(spacing: 16) {
-            Text("Download a model once to get started — then chat and create entirely offline.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Button {
-                showModelLibrary = true
-            } label: {
-                Label("Choose a Model", systemImage: "arrow.down.circle.fill")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     // MARK: - Actions
@@ -191,6 +128,46 @@ struct HomeView: View {
         guard let chat = ChatSession.shared.startNewChat() else { return }
         ChatSession.shared.createImage(prompt: prompt)
         router.openChat(chat)
+    }
+}
+
+/// Screenshot-style action tile: a colored circular icon, a title, and a
+/// trailing arrow, on an elevated rounded card.
+private struct HomeCard: View {
+    let title: String
+    let icon: String
+    let tint: Color
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 0) {
+                Image(systemName: icon)
+                    .font(.system(size: 22))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(tint.gradient, in: Circle())
+
+                Spacer(minLength: 28)
+
+                HStack(alignment: .bottom) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(16)
+            .frame(height: 160, alignment: .topLeading)
+            .frame(maxWidth: .infinity)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 

@@ -21,6 +21,12 @@ struct SynapTabBar: View {
     private let circleSize: CGFloat = 65
     private var poke: CGFloat { circleSize * 0.45 }
 
+    /// Height the bar occupies ABOVE the bottom safe area. Scroll content uses
+    /// this (via `.synapTabBarInset()`) so nothing hides behind the bar —
+    /// `.safeAreaInset` on the bar itself doesn't reach scroll views nested in
+    /// each tab's NavigationStack, so we inset the scroll views directly.
+    static let reservedHeight: CGFloat = 88
+
     var body: some View {
         ZStack(alignment: .top) {
             card
@@ -85,6 +91,17 @@ struct SynapTabBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("New chat")
+    }
+}
+
+extension View {
+    /// Reserve bottom space for the floating tab bar so scroll content clears
+    /// it. Apply to a scrollable view (ScrollView / List / Form) on any screen
+    /// the tab bar overlays.
+    func synapTabBarInset() -> some View {
+        safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: SynapTabBar.reservedHeight)
+        }
     }
 }
 

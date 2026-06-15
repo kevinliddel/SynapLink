@@ -39,20 +39,15 @@ struct ChatListView: View {
             }
         }
         .listStyle(.plain)
-        .searchable(text: $searchText, prompt: "Search chats")
+        .scrollIndicators(.hidden)
+        .synapTabBarInset()
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Search chats")
         .overlay {
             if chats.isEmpty { emptyState }
         }
         .navigationTitle("History")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("New Chat", systemImage: "square.and.pencil") {
-                    router.openNewChat()
-                }
-                .disabled(!downloadManager.isAvailable)
-            }
-        }
     }
 
     @ViewBuilder

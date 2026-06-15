@@ -23,10 +23,18 @@ struct ChatScreen: View {
                         Button {
                             router.closeChat()
                         } label: {
-                            Image(systemName: "chevron.down")
+                            Image(systemName: "chevron.left")
                                 .font(.body.weight(.semibold))
                         }
                         .accessibilityLabel("Close chat")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            router.openNewChat()
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                        }
+                        .accessibilityLabel("New chat")
                     }
                 }
         }

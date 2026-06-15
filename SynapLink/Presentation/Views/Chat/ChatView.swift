@@ -23,6 +23,7 @@ struct ChatView: View {
     @State private var showVoiceMode = false
     @State private var showImageGen = false
     @State private var specialists = SpecialistManager.shared
+    @State private var viewportHeight: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -199,38 +200,45 @@ struct ChatView: View {
                         creatingImageIndicator
                     }
                     statusBanner
-                    // Stable scroll target: always present, always last.
+                    // During a turn, reserve a near-viewport gap so the user's
+                    // message can sit at the TOP with the reply streaming below
+                    // it; collapses once the exchange settles.
                     Color.clear
-                        .frame(height: 1)
+                        .frame(height: bottomSpacer)
                         .id("bottom")
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
             }
-            // Open at the latest message and stay pinned to the bottom while
-            // content grows (streaming) — unless the user scrolls away.
-            .defaultScrollAnchor(.bottom)
+            .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: session.streamingText) {
-                proxy.scrollTo("bottom", anchor: .bottom)
-            }
-            .onChange(of: session.messages.count) {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(
-                for: UIResponder.keyboardWillShowNotification)
-            ) { _ in
-                // Let the keyboard inset land first, then bring the latest
-                // reply back above the keyboard.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+            .onChange(of: session.messages.last?.id) {
+                guard let last = session.messages.last else { return }
+                // A new user message jumps to the top; a finished reply just
+                // settles where it is.
+                if last.role == .user {
                     withAnimation(.easeOut(duration: 0.25)) {
-                        proxy.scrollTo("bottom", anchor: .bottom)
+                        proxy.scrollTo(last.id, anchor: .top)
                     }
                 }
             }
+            .onAppear {
+                if let last = session.messages.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
         }
+    }
+
+    /// Room below the conversation so the latest user message can scroll to the
+    /// top during a turn (ChatGPT-style); near-zero at rest.
+    private var bottomSpacer: CGFloat {
+        guard viewportHeight > 0 else { return 8 }
+        if session.isGenerating || session.isCreatingImage || session.messages.last?.role == .user {
+            return viewportHeight * 0.8
+        }
+        return 8
     }
 
     /// Diffusion is slow on-device — a calmer, longer-wait affordance.

@@ -50,6 +50,8 @@ struct LogView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                 }
                 .listStyle(.plain)
+                .scrollIndicators(.hidden)
+                .synapTabBarInset()
             }
         }
         .navigationTitle("Logs")

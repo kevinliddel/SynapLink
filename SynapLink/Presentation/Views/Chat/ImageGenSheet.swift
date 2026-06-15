@@ -39,6 +39,7 @@ struct ImageGenSheet: View {
                     }
                 }
             }
+            .scrollIndicators(.hidden)
             .navigationTitle("Create Image")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

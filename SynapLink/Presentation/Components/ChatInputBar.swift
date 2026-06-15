@@ -5,7 +5,7 @@
 //  Capability-driven message bar:
 //    multimodal model →  [camera]  ( Write here )  (● voice)
 //    text-only model  →            ( Write here )  (↑ send)
-//  The trailing button morphs: green voice circle when the field is empty
+//  The trailing button morphs: blue voice circle when the field is empty
 //  and the model hears audio; accent send arrow once there's a draft;
 //  red stop while generating.
 //
@@ -82,7 +82,7 @@ struct ChatInputBar: View {
                 .disabled(!hasDraft || !canSend)
                 .accessibilityLabel("Send")
         } else {
-            circleButton(systemImage: "waveform", background: .green, action: onVoice)
+            circleButton(systemImage: "waveform", background: .blue, action: onVoice)
                 .disabled(!canSend)
                 .accessibilityLabel("Voice message")
         }

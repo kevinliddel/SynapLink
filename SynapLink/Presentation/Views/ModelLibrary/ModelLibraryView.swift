@@ -43,6 +43,7 @@ struct ModelLibraryView: View {
                                value: String(format: "%.0f GB RAM", RuntimeProfile.physicalMemoryGB.rounded()))
             }
         }
+        .scrollIndicators(.hidden)
         .navigationTitle("Model Library")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { manager.refreshStates() }

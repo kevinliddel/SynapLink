@@ -14,13 +14,14 @@ struct RootTabView: View {
     @State private var router = AppRouter.shared
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             content
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    SynapTabBar(selection: $router.tab,
-                                chatActive: router.presentedChat != nil,
-                                onChat: { router.openNewChat() })
-                }
+
+            // Floating bar overlays the content; each tab's scroll view adds
+            // `.synapTabBarInset()` so nothing scrolls under it.
+            SynapTabBar(selection: $router.tab,
+                        chatActive: router.presentedChat != nil,
+                        onChat: { router.openNewChat() })
 
             if let chat = router.presentedChat {
                 ChatScreen(chat: chat)

@@ -9,16 +9,18 @@ import SwiftUI
 
 struct SettingsView: View {
     @State private var settings = ChatSettings.shared
+    @State private var showModelLibrary = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Models") {
-                    NavigationLink {
-                        ModelLibraryView()
+                    Button {
+                        showModelLibrary = true
                     } label: {
                         Label("Model Library", systemImage: "square.stack.3d.up")
                     }
+                    .tint(.primary)
                 }
 
                 Section {
@@ -59,7 +61,19 @@ struct SettingsView: View {
                     }
                 }
             }
+            .scrollIndicators(.hidden)
+            .synapTabBarInset()
             .navigationTitle("Settings")
+            .sheet(isPresented: $showModelLibrary) {
+                NavigationStack {
+                    ModelLibraryView()
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { showModelLibrary = false }
+                            }
+                        }
+                }
+            }
         }
     }
 }
