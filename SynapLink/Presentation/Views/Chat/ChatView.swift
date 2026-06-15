@@ -21,6 +21,8 @@ struct ChatView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var pendingImage: Data?
     @State private var showVoiceMode = false
+    @State private var showImageGen = false
+    @State private var specialists = SpecialistManager.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,7 +30,7 @@ struct ChatView: View {
             attachmentChip
             ChatInputBar(
                 draft: $draft,
-                supportsVision: session.canSendImages,
+                supportsVision: session.canAttachMedia,
                 supportsAudio: session.canSendAudio,
                 isGenerating: session.isGenerating,
                 canSend: session.engineState != .loading,
@@ -53,8 +55,14 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showAttachDialog) {
             AttachmentSheet(
+                canAttachPhoto: session.canSendImages,
                 onCamera: { presentAfterSheet { showCamera = true } },
-                onLibrary: { presentAfterSheet { showPhotoPicker = true } })
+                onLibrary: { presentAfterSheet { showPhotoPicker = true } },
+                canCreateImage: specialists.isInstalled(.imageGen),
+                onCreateImage: { presentAfterSheet { showImageGen = true } })
+        }
+        .sheet(isPresented: $showImageGen) {
+            ImageGenSheet { prompt in session.createImage(prompt: prompt) }
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { image in
@@ -187,6 +195,9 @@ struct ChatView: View {
                             MessageBubble(role: .assistant, text: session.streamingText, isStreaming: true)
                         }
                     }
+                    if session.isCreatingImage {
+                        creatingImageIndicator
+                    }
                     statusBanner
                     // Stable scroll target: always present, always last.
                     Color.clear
@@ -219,6 +230,27 @@ struct ChatView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Diffusion is slow on-device — a calmer, longer-wait affordance.
+    private var creatingImageIndicator: some View {
+        HStack {
+            HStack(spacing: 10) {
+                Image(systemName: "wand.and.stars")
+                    .symbolEffect(.variableColor.iterative)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Creating image…").font(.callout)
+                    Text("On-device — this can take a while.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            Spacer(minLength: 48)
         }
     }
 

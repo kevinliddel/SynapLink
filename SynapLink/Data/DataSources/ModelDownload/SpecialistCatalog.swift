@@ -19,6 +19,7 @@ import Foundation
 enum SpecialistModel: String, CaseIterable, Identifiable {
     case whisper = "Speech to Text"
     case vision = "Image Understanding"
+    case imageGen = "Image Creation"
 
     var id: String { rawValue }
 
@@ -26,21 +27,23 @@ enum SpecialistModel: String, CaseIterable, Identifiable {
         switch self {
         case .whisper: return "ggerganov/whisper.cpp"
         case .vision: return "ggml-org/SmolVLM-500M-Instruct-GGUF"
+        case .imageGen: return "second-state/stable-diffusion-v1-5-GGUF"
         }
     }
 
-    /// Primary model file (whisper .bin / VLM .gguf).
+    /// Primary model file (whisper .bin / VLM .gguf / SD checkpoint .gguf).
     var filename: String {
         switch self {
         case .whisper: return "ggml-base.bin"
         case .vision: return "SmolVLM-500M-Instruct-Q8_0.gguf"
+        case .imageGen: return "stable-diffusion-v1-5-pruned-emaonly-Q4_0.gguf"
         }
     }
 
-    /// Vision projector (vision only).
+    /// Vision projector (vision) / TAESD tiny VAE slot (image-gen, unused for now).
     var mmprojFilename: String? {
         switch self {
-        case .whisper: return nil
+        case .whisper, .imageGen: return nil
         case .vision: return "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
         }
     }
@@ -53,6 +56,7 @@ enum SpecialistModel: String, CaseIterable, Identifiable {
         switch self {
         case .whisper: return 142
         case .vision: return 437 + 109
+        case .imageGen: return 1567
         }
     }
 
@@ -60,6 +64,7 @@ enum SpecialistModel: String, CaseIterable, Identifiable {
         switch self {
         case .whisper: return "waveform"
         case .vision: return "photo"
+        case .imageGen: return "wand.and.stars"
         }
     }
 
@@ -67,12 +72,22 @@ enum SpecialistModel: String, CaseIterable, Identifiable {
         switch self {
         case .whisper: return "Speak instead of type — transcribed on-device."
         case .vision: return "Attach a photo and ask about it."
+        case .imageGen: return "Create images from a text prompt."
         }
     }
 
-    /// Specialists are deliberately small; both fit the 4 GB tier alongside
-    /// the main text model. Kept as a knob in case a future entry is heavier.
-    var requiredRAMGB: Double { 0 }
+    /// Experimental on the 4 GB tier: heavy and slow, may strain memory.
+    var isExperimental: Bool { self == .imageGen }
+
+    /// whisper/vision are tiny and fit any supported device. Image generation
+    /// is ~1.6 GB resident during diffusion — gate it to ≈4 GB+ and warn it's
+    /// experimental there (the main chat model is unloaded while it runs).
+    var requiredRAMGB: Double {
+        switch self {
+        case .whisper, .vision: return 0
+        case .imageGen: return 3.5
+        }
+    }
 
     var isSupportedOnThisDevice: Bool {
         RuntimeProfile.physicalMemoryGB + 0.5 >= requiredRAMGB

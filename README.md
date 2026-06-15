@@ -35,21 +35,25 @@ Baseline device: **iPhone 11 (A13, 4 GB RAM)**.
 ## Layout
 
 - `SynapLink/` — app sources (SwiftUI + Swift service layer + C/C++ engine)
-- `scripts/build-llama-xcframework.sh` — builds `Frameworks/llama.xcframework`
-  (Metal + libmtmd) from a pinned llama.cpp tag
-- `scripts/build-whisper-xcframework.sh` — builds `Frameworks/whisper.xcframework`
-  (on-device speech-to-text specialist) from a pinned whisper.cpp tag
-- `scripts/test-engine-macos.sh` / `scripts/test-whisper-macos.sh` — desktop
-  functional tests of the engine + whisper bridges
+- `scripts/build-frameworks.sh` — builds all three native xcframeworks (run this first)
+- `scripts/build-{llama,whisper,sd}-xcframework.sh` — individual framework builds
+  (llama.cpp + libmtmd, whisper.cpp ASR, stable-diffusion.cpp image-gen)
+- `scripts/test-{engine,whisper,sd}-macos.sh` — desktop functional tests of the bridges
 - `docs/PHASE_0.md` — scaffolding & inference core: build + smoke-test instructions
 - `docs/PHASE_1.md` — text chat MVP: architecture, model catalog, chat pipeline
 - `docs/PHASE_2.md` — multimodal input: attachments, capture, media validation
-- `docs/PHASE_3.md` — audio + image for the 4 GB tier (whisper.cpp + SmolVLM sidecars)
+- `docs/PHASE_3.md` — sidecar specialists: whisper ASR, SmolVLM vision, SD image-gen
 
 ## Quick start
 
+The `*.xcframework`s under `Frameworks/` are **gitignored build artifacts** —
+you must build them before opening Xcode, or the build fails with
+"There is no XCFramework found at …". One command does it (≈40–60 min first run;
+each is skipped if already present):
+
 ```sh
-scripts/build-llama-xcframework.sh   
+git submodule update --init        # llama.cpp, whisper.cpp, stable-diffusion.cpp
+scripts/build-frameworks.sh        # → Frameworks/{llama,whisper,sd}.xcframework
 open SynapLink.xcodeproj
 ```
 

@@ -68,6 +68,38 @@ described a screenshot (image encode ~5 s on Intel CPU — vs E2B's ~87 s — an
 - The CLIP/mmproj encoder must run CPU on non-Apple GPUs (simulator) — handled
   by `RuntimeProfile.visionEngineParams` / `specialistUsesGPU`.
 
+## Image generation (experimental specialist)
+
+A third ggml framework — **stable-diffusion.cpp** (`third_party/stable-diffusion.cpp`,
+`scripts/build-sd-xcframework.sh` → `Frameworks/sd.xcframework`) — adds on-device
+text-to-image. Bridge: `synap_sd.{h,cpp}` → `ImageGenerator` (load → generate →
+unload). Three ggml frameworks now coexist in one app (each force-loads its own
+ggml; two-level namespace keeps them apart — verified building + running).
+
+- **Model:** SD 1.5 (`second-state/...-Q4_0.gguf`, ~1.57 GB). Gated to ≈4 GB+
+  (`requiredRAMGB 3.5`) and flagged experimental on the 4 GB tier. The main chat
+  model is **unloaded during diffusion** (`ChatSession.createImage`) — SD needs
+  nearly the whole budget.
+- **Params per tier** (`RuntimeProfile.imageGenSettings`): 4 GB → 384², 16 steps,
+  EULER_A; ≥6 GB → 512². Tens of seconds to minutes on A13.
+- **UI:** "Create with AI" row in the attachment sheet (shown when installed) →
+  prompt sheet → the generated image posts as an assistant message.
+- **Backend gotcha (important):** ggml-Metal on a non-Apple GPU (the Intel dev
+  Mac, the simulator) produces **all-white (NaN) output**. `synap_sd` pins the
+  backend to `"CPU"` whenever `use_gpu` is false (`RuntimeProfile.specialistUsesGPU`);
+  real iPhones use Metal (Apple GPU). This cost a long debug detour — the white
+  output looked like a quantization failure (Q4 *and* Q8 were both white) until
+  forcing CPU produced a correct image. **Not** a quant issue.
+- **TAESD** (tiny VAE) was tried to shrink memory but the available file
+  segfaulted in sd.cpp — dropped; the checkpoint's own VAE is used. First lever
+  if 4 GB memory testing struggles.
+- E2E validated on desktop (CPU): `scripts/test-sd-macos.sh` generated a coherent
+  "red apple on a table" at 256²/18 steps (~35 s on the Intel CPU).
+
+⚠️ On-device 4 GB testing is still required: whether SD 1.5's ~1.6 GB resident +
+diffusion working set survives the iPhone 11 jetsam ceiling is the open question
+the experiment exists to answer.
+
 ## Still open (the PLAN's realtime voice loop proper)
 
 This phase delivered the **input models**; the streaming voice *loop* (VAD →

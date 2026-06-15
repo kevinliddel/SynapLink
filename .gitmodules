@@ -6,3 +6,7 @@
 	path = third_party/whisper.cpp
 	url = https://github.com/ggml-org/whisper.cpp
 	shallow = true
+[submodule "third_party/stable-diffusion.cpp"]
+	path = third_party/stable-diffusion.cpp
+	url = https://github.com/leejet/stable-diffusion.cpp
+	shallow = true

@@ -10,13 +10,24 @@ import SwiftUI
 import UIKit
 
 struct AttachmentSheet: View {
+    var canAttachPhoto: Bool = true
     var onCamera: () -> Void
     var onLibrary: () -> Void
+    var canCreateImage: Bool = false
+    var onCreateImage: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
 
     private var cameraAvailable: Bool {
-        UIImagePickerController.isSourceTypeAvailable(.camera)
+        canAttachPhoto && UIImagePickerController.isSourceTypeAvailable(.camera)
+    }
+
+    private var detentHeight: CGFloat {
+        var rows = 0
+        if canAttachPhoto { rows += 1 }    // library
+        if cameraAvailable { rows += 1 }
+        if canCreateImage { rows += 1 }
+        return CGFloat(max(1, rows)) * 68 + 70
     }
 
     var body: some View {
@@ -27,7 +38,7 @@ struct AttachmentSheet: View {
                 .padding(.top, 8)
                 .padding(.bottom, 12)
 
-            Text("Add a photo")
+            Text("Add to the conversation")
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
@@ -41,9 +52,18 @@ struct AttachmentSheet: View {
                     }
                     Divider().padding(.leading, 72)
                 }
-                row(title: "Photo Library", subtitle: "Choose an existing photo",
-                    icon: "photo.on.rectangle.angled", tint: .green) {
-                    dismiss(); onLibrary()
+                if canAttachPhoto {
+                    row(title: "Photo Library", subtitle: "Choose an existing photo",
+                        icon: "photo.on.rectangle.angled", tint: .green) {
+                        dismiss(); onLibrary()
+                    }
+                }
+                if canCreateImage {
+                    if canAttachPhoto { Divider().padding(.leading, 72) }
+                    row(title: "Create with AI", subtitle: "Generate an image from text",
+                        icon: "wand.and.stars", tint: .purple) {
+                        dismiss(); onCreateImage()
+                    }
                 }
             }
             .background(Color(.secondarySystemGroupedBackground))
@@ -52,7 +72,7 @@ struct AttachmentSheet: View {
 
             Spacer(minLength: 12)
         }
-        .presentationDetents([.height(cameraAvailable ? 260 : 190)])
+        .presentationDetents([.height(detentHeight)])
         .presentationDragIndicator(.hidden)
     }
 

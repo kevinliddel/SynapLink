@@ -155,6 +155,11 @@ final class ChatSession {
         capabilities?.hasAudio == true || SpecialistManager.shared.isInstalled(.whisper)
     }
 
+    /// Show the attach (＋) button if photos can be understood OR images created.
+    var canAttachMedia: Bool {
+        canSendImages || SpecialistManager.shared.isInstalled(.imageGen)
+    }
+
     /// Whisper transcribes at 16 kHz; a native-audio main model may want its
     /// own rate.
     var audioCaptureSampleRate: Int32 {
@@ -197,6 +202,46 @@ final class ChatSession {
 
     func stop() {
         engine.cancel()
+    }
+
+    // MARK: - Image generation (experimental specialist)
+
+    /// True while the SD specialist is producing an image (no token stream).
+    private(set) var isCreatingImage = false
+
+    /// Generate an image from `prompt` and post it as an assistant message.
+    /// Unloads the main chat model first — on the 4 GB tier SD needs nearly
+    /// the whole memory budget.
+    func createImage(prompt: String) {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isGenerating, !isCreatingImage, let chat = activeChat else { return }
+
+        if let saved = store.appendMessage(chatID: chat.id, role: .user, content: trimmed) {
+            messages.append(saved)
+        }
+        autoTitleIfNeeded(chat: chat, firstUserText: trimmed)
+
+        isCreatingImage = true
+        lastError = nil
+        generationTask = Task { [weak self] in
+            guard let self else { return }
+            // Free the chat model's RAM for the duration of diffusion.
+            await self.unloadEngine()
+            do {
+                let jpeg = try await ImageGenerator.shared.generate(prompt: trimmed)
+                if self.activeChat?.id == chat.id,
+                   let message = self.store.appendMessage(chatID: chat.id, role: .assistant, content: "") {
+                    var saved = message
+                    if let row = self.store.appendAttachment(messageID: message.id, kind: .image, data: jpeg) {
+                        saved.attachments.append(row)
+                    }
+                    self.messages.append(saved)
+                }
+            } catch {
+                self.lastError = error.localizedDescription
+            }
+            self.isCreatingImage = false
+        }
     }
 
     private func generate() {

@@ -71,3 +71,4 @@ PLAN.md
 # Built artifacts (reproduce with scripts/build-llama-xcframework.sh)
 Frameworks/llama.xcframework/
 Frameworks/whisper.xcframework/
+Frameworks/sd.xcframework/
