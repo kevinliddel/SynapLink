@@ -58,9 +58,13 @@ final class WhisperTranscriber: @unchecked Sendable {
                         languageCode, &buffer, Int32(buffer.count))
                 }
                 if written < 0 {
+                    slog("whisper transcription failed (rc \(written))", .error)
                     continuation.resume(throwing: WhisperError.transcriptionFailed)
                 } else {
-                    continuation.resume(returning: String(cString: buffer))
+                    let text = String(cString: buffer)
+                    let seconds = samples.count / Int(SYNAP_WHISPER_SAMPLE_RATE)
+                    slog("transcribed \(seconds)s of audio → \(text.count) chars", .info)
+                    continuation.resume(returning: text)
                 }
             }
         }

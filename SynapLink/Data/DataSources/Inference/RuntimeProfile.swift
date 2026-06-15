@@ -74,7 +74,9 @@ enum RuntimeProfile {
         let eulerAncestral: Int32 = 1
         switch physicalMemoryGB {
         case ..<5.0:
-            return ImageGenSettings(width: 384, height: 384, steps: 16,
+            // iPhone 11 tier: small canvas keeps the CPU diffusion working set
+            // modest (and faster, since this tier runs on CPU — see below).
+            return ImageGenSettings(width: 256, height: 256, steps: 16,
                                     cfgScale: 7.0, sampleMethod: eulerAncestral)
         case ..<7.0:
             return ImageGenSettings(width: 512, height: 512, steps: 20,
@@ -83,6 +85,18 @@ enum RuntimeProfile {
             return ImageGenSettings(width: 512, height: 512, steps: 28,
                                     cfgScale: 7.5, sampleMethod: eulerAncestral)
         }
+    }
+
+    /// Image generation runs on CPU on the 4 GB tier. ggml-Metal on the A13
+    /// exceeds the GPU's working-set limit loading SD 1.5 (~1.6 GB) and
+    /// aborts; CPU can use the full jetsam budget and is proven to work
+    /// (slower). ≥6 GB devices have the Metal headroom to use the GPU.
+    static var imageGenUsesGPU: Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        return physicalMemoryGB >= 6.0
+        #endif
     }
 
     /// Vision specialist (SmolVLM) engine params: small context — it captions

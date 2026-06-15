@@ -125,12 +125,15 @@ final class ChatSession {
         }
         let params = RuntimeProfile.engineParams(
             modelPath: modelURL.path, mmprojPath: config.mmprojURL()?.path)
+        slog("loading \(config.rawValue) (ctx \(params.nCtx), \(params.nThreads) threads, gpu=\(params.nGPULayers))", .info)
         do {
             let caps = try await engine.load(params)
             loadedNCtx = Int(caps.nCtx)
             capabilities = caps
             engineState = .ready(description: caps.modelDescription)
+            slog("engine ready: \(caps.modelDescription) — vision=\(caps.hasVision) audio=\(caps.hasAudio)", .info)
         } catch {
+            slog("engine load failed: \(error.localizedDescription)", .error)
             engineState = .failed(message: error.localizedDescription)
         }
     }
@@ -140,6 +143,7 @@ final class ChatSession {
         await engine.unload()
         capabilities = nil
         engineState = .unloaded
+        slog("engine unloaded", .debug)
     }
 
     // MARK: - Effective input capabilities (main model OR sidecar specialist)
@@ -238,6 +242,7 @@ final class ChatSession {
                     self.messages.append(saved)
                 }
             } catch {
+                slog("createImage failed: \(error.localizedDescription)", .error)
                 self.lastError = error.localizedDescription
             }
             self.isCreatingImage = false
@@ -285,6 +290,7 @@ final class ChatSession {
                     self.streamingText += piece
                 }
             } catch {
+                slog("generation failed: \(error.localizedDescription)", .error)
                 self.lastError = error.localizedDescription
             }
 

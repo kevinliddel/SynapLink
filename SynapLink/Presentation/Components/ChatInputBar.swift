@@ -53,7 +53,8 @@ struct ChatInputBar: View {
                 .padding(.vertical, 10)
                 .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(.quaternary, lineWidth: 1))
+                        .strokeBorder(.quaternary, lineWidth: 1)
+                )
                 .focused($focused)
                 .disabled(isGenerating)
 
@@ -65,7 +66,7 @@ struct ChatInputBar: View {
         .background {
             // The shape must run under the home indicator, or the safe-area
             // strip below the footer shows the scroll background through.
-            UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26, style: .continuous)
+            UnevenRoundedRectangle(topLeadingRadius: 40, topTrailingRadius: 40, style: .continuous)
                 .fill(.bar)
                 .ignoresSafeArea(edges: .bottom)
         }
@@ -76,9 +77,9 @@ struct ChatInputBar: View {
         if isGenerating {
             circleButton(systemImage: "stop.fill", background: .red, action: onStop)
                 .accessibilityLabel("Stop generating")
-        } else if canSubmit || !supportsAudio {
+        } else if hasDraft || !supportsAudio {
             circleButton(systemImage: "arrow.up", background: Color.accentColor, action: onSend)
-                .disabled(!canSubmit || !canSend)
+                .disabled(!hasDraft || !canSend)
                 .accessibilityLabel("Send")
         } else {
             circleButton(systemImage: "waveform", background: .green, action: onVoice)
@@ -87,8 +88,10 @@ struct ChatInputBar: View {
         }
     }
 
-    private func circleButton(systemImage: String, background: Color,
-                              action: @escaping () -> Void) -> some View {
+    private func circleButton(
+        systemImage: String, background: Color,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 18, weight: .semibold))
@@ -100,13 +103,15 @@ struct ChatInputBar: View {
 }
 
 #Preview("Multimodal") {
-    ChatInputBar(draft: .constant(""), supportsVision: true, supportsAudio: true,
-                 isGenerating: false, canSend: true,
-                 onSend: {}, onStop: {}, onCamera: {}, onVoice: {})
+    ChatInputBar(
+        draft: .constant(""), supportsVision: true, supportsAudio: true,
+        isGenerating: false, canSend: true,
+        onSend: {}, onStop: {}, onCamera: {}, onVoice: {})
 }
 
 #Preview("Text only") {
-    ChatInputBar(draft: .constant("Hello"), supportsVision: false, supportsAudio: false,
-                 isGenerating: false, canSend: true,
-                 onSend: {}, onStop: {}, onCamera: {}, onVoice: {})
+    ChatInputBar(
+        draft: .constant("Hello"), supportsVision: false, supportsAudio: false,
+        isGenerating: false, canSend: true,
+        onSend: {}, onStop: {}, onCamera: {}, onVoice: {})
 }

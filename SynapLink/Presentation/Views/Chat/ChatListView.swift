@@ -2,9 +2,9 @@
 //  ChatListView.swift
 //  SynapLink
 //
-//  Home screen: chat history with search and previews, new-chat, model
-//  status. First run routes straight to the Model Library — no detours
-//  through Settings.
+//  Chat tab: conversation history with search and previews, plus new-chat.
+//  First-run model setup lives on the Home tab; this tab opens chats handed
+//  to it by the router (e.g. when Home starts a chat or an image generation).
 //
 
 import SwiftUI
@@ -12,10 +12,9 @@ import SwiftUI
 struct ChatListView: View {
     @State private var store = ChatStore.shared
     @State private var downloadManager = ModelDownloadManager.shared
+    @State private var router = AppRouter.shared
     @State private var searchText = ""
     @State private var path: [Chat] = []
-    @State private var showSettings = false
-    @State private var showModelLibrary = false
 
     private var chats: [Chat] {
         _ = store.lastUpdated  // observe mutations
@@ -24,53 +23,42 @@ struct ChatListView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            Group {
-                if !downloadManager.isAvailable && chats.isEmpty {
-                    firstRunPrompt
-                } else {
-                    chatList
+            chatList
+                .navigationTitle("Chats")
+                .navigationDestination(for: Chat.self) { chat in
+                    ChatView(chat: chat)
                 }
-            }
-            .navigationTitle("SynapLink")
-            .navigationDestination(for: Chat.self) { chat in
-                ChatView(chat: chat)
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Settings", systemImage: "gearshape") {
-                        showSettings = true
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("New Chat", systemImage: "square.and.pencil") {
-                        startNewChat()
-                    }
-                    .disabled(!downloadManager.isAvailable)
-                }
-            }
-            .sheet(isPresented: $showSettings) {
-                SettingsView()
-            }
-            .sheet(isPresented: $showModelLibrary) {
-                NavigationStack {
-                    ModelLibraryView()
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button("Done") { showModelLibrary = false }
-                            }
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("New Chat", systemImage: "square.and.pencil") {
+                            startNewChat()
                         }
+                        .disabled(!downloadManager.isAvailable)
+                    }
                 }
-            }
-            .safeAreaInset(edge: .bottom) {
-                if !downloadManager.isAvailable && !chats.isEmpty {
-                    noModelBanner
-                }
-            }
-            .onAppear { downloadManager.refreshStates() }
+        }
+        // onChange catches the case where this view is already on screen;
+        // onAppear catches a hand-off from another tab (Home), where
+        // pendingChat was set before this view existed — onChange wouldn't fire.
+        .onChange(of: router.pendingChat) { consumePendingChat() }
+        // Hide the bottom tab bar whenever a conversation is open.
+        .onChange(of: path) { router.hideTabBar = !path.isEmpty }
+        .onChange(of: router.tab) { syncTabBarVisibility() }
+        .onAppear {
+            consumePendingChat()
+            syncTabBarVisibility()
         }
     }
 
-    // MARK: - Chat list
+    private func consumePendingChat() {
+        guard let chat = router.pendingChat else { return }
+        path = [chat]
+        router.pendingChat = nil
+    }
+
+    private func syncTabBarVisibility() {
+        router.hideTabBar = router.tab == .chat && !path.isEmpty
+    }
 
     private var chatList: some View {
         List {
@@ -89,61 +77,29 @@ struct ChatListView: View {
         .listStyle(.plain)
         .searchable(text: $searchText, prompt: "Search chats")
         .overlay {
-            if chats.isEmpty {
-                ContentUnavailableView(
-                    searchText.isEmpty ? "No chats yet" : "No results",
-                    systemImage: searchText.isEmpty ? "bubble.left.and.bubble.right" : "magnifyingglass",
-                    description: Text(searchText.isEmpty
-                        ? "Tap \(Image(systemName: "square.and.pencil")) to start a conversation."
-                        : "Try a different search."))
-            }
+            if chats.isEmpty { emptyState }
         }
     }
 
-    // MARK: - Model state affordances
-
-    private var firstRunPrompt: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            Image(systemName: "brain.fill")
-                .font(.system(size: 56))
-                .foregroundStyle(Color.accentColor.gradient)
-            VStack(spacing: 8) {
-                Text("Your private AI, fully offline")
-                    .font(.title2.weight(.semibold))
-                Text("Download a model once — every conversation after that stays on this device. No cloud, no account, no network.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+    @ViewBuilder
+    private var emptyState: some View {
+        if !downloadManager.isAvailable {
+            ContentUnavailableView {
+                Label("No model yet", systemImage: "brain")
+            } description: {
+                Text("Set up a model on the Home tab to start chatting.")
+            } actions: {
+                Button("Go to Home") { router.tab = .home }
+                    .buttonStyle(.borderedProminent)
             }
-            Button {
-                showModelLibrary = true
-            } label: {
-                Label("Choose a Model", systemImage: "arrow.down.circle.fill")
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            Spacer()
-            Spacer()
+        } else {
+            ContentUnavailableView(
+                searchText.isEmpty ? "No chats yet" : "No results",
+                systemImage: searchText.isEmpty ? "bubble.left.and.bubble.right" : "magnifyingglass",
+                description: Text(searchText.isEmpty
+                    ? "Tap \(Image(systemName: "square.and.pencil")) to start a conversation."
+                    : "Try a different search."))
         }
-    }
-
-    private var noModelBanner: some View {
-        Button {
-            showModelLibrary = true
-        } label: {
-            Label("No model installed — tap to download", systemImage: "exclamationmark.circle")
-                .font(.footnote.weight(.medium))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(.orange.opacity(0.15), in: Capsule())
-                .foregroundStyle(.orange)
-                .padding(.horizontal)
-        }
-        .padding(.bottom, 6)
     }
 
     private func startNewChat() {

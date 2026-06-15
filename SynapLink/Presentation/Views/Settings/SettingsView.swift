@@ -8,7 +8,6 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var settings = ChatSettings.shared
 
     var body: some View {
@@ -51,17 +50,16 @@ struct SettingsView: View {
                     NavigationLink {
                         SmokeTestView()
                     } label: {
-                        Label("Inference Smoke Test", systemImage: "speedometer")
+                        Label("Performance Test", systemImage: "speedometer")
+                    }
+                    NavigationLink {
+                        LogView()
+                    } label: {
+                        Label("Logs", systemImage: "text.alignleft")
                     }
                 }
             }
             .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
         }
     }
 }

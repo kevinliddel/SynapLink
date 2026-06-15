@@ -16,6 +16,7 @@ enum ImageGenError: Error, LocalizedError {
     case loadFailed
     case generationFailed
     case unsupportedDevice
+    case insufficientMemory(availableMB: Int)
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +24,9 @@ enum ImageGenError: Error, LocalizedError {
         case .loadFailed: return "Failed to load the image model."
         case .generationFailed: return "Image generation failed."
         case .unsupportedDevice: return "This device doesn't have enough memory to generate images."
+        case .insufficientMemory(let mb):
+            return "Not enough free memory to generate an image right now (\(mb) MB available). "
+                + "Close other apps and try again — image creation is experimental on this device."
         }
     }
 }
@@ -50,18 +54,32 @@ final class ImageGenerator: @unchecked Sendable {
         let spec = SpecialistModel.imageGen
         guard spec.isSupportedOnThisDevice else { throw ImageGenError.unsupportedDevice }
         guard let model = spec.modelURL() else { throw ImageGenError.modelNotInstalled }
+
+        // SD 1.5 needs ~1.6 GB resident plus the diffusion working set. If the
+        // jetsam headroom is already below that, attempting it would abort the
+        // process (a native OOM can't be caught) — refuse with a clear message.
+        let availableMB = MemoryFootprint.available() / (1024 * 1024)
+        slog("image-gen requested — \(availableMB) MB free, gpu=\(RuntimeProfile.imageGenUsesGPU)", .info)
+        if availableMB > 0 && availableMB < 1700 {
+            slog("refusing image-gen: only \(availableMB) MB free", .warning)
+            throw ImageGenError.insufficientMemory(availableMB: availableMB)
+        }
+
         let taesd = spec.mmprojURL()  // TAESD reuses the catalog's "mmproj" slot
         let settings = RuntimeProfile.imageGenSettings
+        slog("image-gen \(settings.width)x\(settings.height), \(settings.steps) steps", .info)
 
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 guard let handle = synap_sd_create(
                     model.path, taesd?.path, RuntimeProfile.specialistThreads,
-                    RuntimeProfile.specialistUsesGPU) else {
+                    RuntimeProfile.imageGenUsesGPU) else {
+                    slog("SD model load failed", .error)
                     continuation.resume(throwing: ImageGenError.loadFailed)
                     return
                 }
                 defer { synap_sd_free(handle) }
+                slog("SD model loaded, generating…", .debug)
 
                 var width: Int32 = 0
                 var height: Int32 = 0
@@ -82,9 +100,11 @@ final class ImageGenerator: @unchecked Sendable {
                 defer { synap_sd_free_rgb(rgb) }
 
                 guard let jpeg = Self.jpeg(fromRGB: rgb, width: Int(width), height: Int(height)) else {
+                    slog("SD image encode failed", .error)
                     continuation.resume(throwing: ImageGenError.generationFailed)
                     return
                 }
+                slog("image generated: \(width)x\(height), \(jpeg.count / 1024) KB", .info)
                 continuation.resume(returning: jpeg)
             }
         }
