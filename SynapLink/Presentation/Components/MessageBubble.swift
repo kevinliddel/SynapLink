@@ -61,9 +61,16 @@ struct MessageBubble: View {
         } else if text.isEmpty {
             EmptyView()
         } else if role == .assistant {
-            // Block markdown: fenced code with copy button, headings, inline styles.
-            MarkdownText(text: isStreaming ? text + " ●" : text)
-                .textSelection(.enabled)
+            if isStreaming {
+                // Plain, smoothly-revealed text while generating — markdown is
+                // applied once the reply settles (avoids per-token reflow).
+                StreamingText(fullText: text)
+            } else {
+                // Block markdown: fenced code with copy button, headings, inline styles.
+                MarkdownText(text: text)
+                    .textSelection(.enabled)
+                    .transition(.opacity)
+            }
         } else {
             Text(MarkdownText.inline(text))
                 .textSelection(.enabled)
