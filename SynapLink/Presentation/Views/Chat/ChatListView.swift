@@ -2,9 +2,10 @@
 //  ChatListView.swift
 //  SynapLink
 //
-//  Chat tab: conversation history with search and previews, plus new-chat.
-//  First-run model setup lives on the Home tab; this tab opens chats handed
-//  to it by the router (e.g. when Home starts a chat or an image generation).
+//  Chat history: conversation list with search and previews, reached from the
+//  Home toolbar's history button. Tapping a row (or New) opens the chat as a
+//  full-screen overlay via the router. This view is pushed inside Home's
+//  navigation stack, so it has no NavigationStack of its own.
 //
 
 import SwiftUI
@@ -14,7 +15,6 @@ struct ChatListView: View {
     @State private var downloadManager = ModelDownloadManager.shared
     @State private var router = AppRouter.shared
     @State private var searchText = ""
-    @State private var path: [Chat] = []
 
     private var chats: [Chat] {
         _ = store.lastUpdated  // observe mutations
@@ -22,50 +22,14 @@ struct ChatListView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            chatList
-                .navigationTitle("Chats")
-                .navigationDestination(for: Chat.self) { chat in
-                    ChatView(chat: chat)
-                }
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("New Chat", systemImage: "square.and.pencil") {
-                            startNewChat()
-                        }
-                        .disabled(!downloadManager.isAvailable)
-                    }
-                }
-        }
-        // onChange catches the case where this view is already on screen;
-        // onAppear catches a hand-off from another tab (Home), where
-        // pendingChat was set before this view existed — onChange wouldn't fire.
-        .onChange(of: router.pendingChat) { consumePendingChat() }
-        // Hide the bottom tab bar whenever a conversation is open.
-        .onChange(of: path) { router.hideTabBar = !path.isEmpty }
-        .onChange(of: router.tab) { syncTabBarVisibility() }
-        .onAppear {
-            consumePendingChat()
-            syncTabBarVisibility()
-        }
-    }
-
-    private func consumePendingChat() {
-        guard let chat = router.pendingChat else { return }
-        path = [chat]
-        router.pendingChat = nil
-    }
-
-    private func syncTabBarVisibility() {
-        router.hideTabBar = router.tab == .chat && !path.isEmpty
-    }
-
-    private var chatList: some View {
         List {
             ForEach(chats) { chat in
-                NavigationLink(value: chat) {
+                Button {
+                    router.openChat(chat)
+                } label: {
                     ChatRow(chat: chat)
                 }
+                .buttonStyle(.plain)
             }
             .onDelete { offsets in
                 let current = chats
@@ -79,6 +43,16 @@ struct ChatListView: View {
         .overlay {
             if chats.isEmpty { emptyState }
         }
+        .navigationTitle("History")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New Chat", systemImage: "square.and.pencil") {
+                    router.openNewChat()
+                }
+                .disabled(!downloadManager.isAvailable)
+            }
+        }
     }
 
     @ViewBuilder
@@ -88,23 +62,14 @@ struct ChatListView: View {
                 Label("No model yet", systemImage: "brain")
             } description: {
                 Text("Set up a model on the Home tab to start chatting.")
-            } actions: {
-                Button("Go to Home") { router.tab = .home }
-                    .buttonStyle(.borderedProminent)
             }
         } else {
             ContentUnavailableView(
                 searchText.isEmpty ? "No chats yet" : "No results",
                 systemImage: searchText.isEmpty ? "bubble.left.and.bubble.right" : "magnifyingglass",
                 description: Text(searchText.isEmpty
-                    ? "Tap \(Image(systemName: "square.and.pencil")) to start a conversation."
+                    ? "Start a conversation from the chat button."
                     : "Try a different search."))
-        }
-    }
-
-    private func startNewChat() {
-        if let chat = ChatSession.shared.startNewChat() {
-            path.append(chat)
         }
     }
 }
@@ -146,8 +111,4 @@ private struct ChatRow: View {
         let prefix = last.role == .user ? "You: " : ""
         return prefix + last.content.replacingOccurrences(of: "\n", with: " ")
     }
-}
-
-#Preview {
-    ChatListView()
 }

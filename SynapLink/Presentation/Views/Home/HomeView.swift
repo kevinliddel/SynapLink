@@ -16,6 +16,7 @@ struct HomeView: View {
     @State private var router = AppRouter.shared
     @State private var showModelLibrary = false
     @State private var showImageGen = false
+    @State private var showHistory = false
 
     private var hasModel: Bool { downloadManager.isAvailable }
 
@@ -34,6 +35,28 @@ struct HomeView: View {
                 .padding()
             }
             .navigationTitle("SynapLink")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        router.tab = .settings   // profile lives in Settings (photo lands in Phase 4)
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                            .font(.title2)
+                    }
+                    .accessibilityLabel("Profile")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showHistory = true
+                    } label: {
+                        Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                    }
+                    .accessibilityLabel("Chat history")
+                }
+            }
+            .navigationDestination(isPresented: $showHistory) {
+                ChatListView()
+            }
             .sheet(isPresented: $showModelLibrary) {
                 NavigationStack {
                     ModelLibraryView()
@@ -77,7 +100,7 @@ struct HomeView: View {
         VStack(spacing: 12) {
             actionCard(title: "Start a Chat", subtitle: "Ask anything, offline",
                        icon: "bubble.left.and.bubble.right.fill", tint: .accentColor) {
-                if let chat = ChatSession.shared.startNewChat() { router.openChat(chat) }
+                router.openNewChat()
             }
             if specialists.isInstalled(.imageGen) {
                 actionCard(title: "Create an Image", subtitle: "Generate art from a text prompt",
