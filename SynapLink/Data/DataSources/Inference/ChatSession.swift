@@ -142,6 +142,25 @@ final class ChatSession {
         engineState = .unloaded
     }
 
+    // MARK: - Effective input capabilities (main model OR sidecar specialist)
+
+    /// Image input works if the main model sees natively (E2B) or the vision
+    /// specialist (SmolVLM) is installed for the sidecar pipeline.
+    var canSendImages: Bool {
+        capabilities?.hasVision == true || SpecialistManager.shared.isInstalled(.vision)
+    }
+
+    /// Audio input works if the main model hears natively or whisper is installed.
+    var canSendAudio: Bool {
+        capabilities?.hasAudio == true || SpecialistManager.shared.isInstalled(.whisper)
+    }
+
+    /// Whisper transcribes at 16 kHz; a native-audio main model may want its
+    /// own rate.
+    var audioCaptureSampleRate: Int32 {
+        capabilities?.hasAudio == true ? (capabilities?.audioSampleRate ?? 16000) : 16000
+    }
+
     // MARK: - Turns
 
     func send(_ text: String, attachments: [PendingAttachment] = []) {
@@ -186,11 +205,9 @@ final class ChatSession {
         streamingText = ""
         lastError = nil
 
-        // The current turn's media comes from the last user message's STORED
-        // attachments — the same path serves fresh sends and regenerates.
         let lastUser = messages.last(where: { $0.role == .user })
-        let mediaData = lastUser?.attachments.compactMap { store.attachmentData($0) } ?? []
-        isAnalyzingMedia = !mediaData.isEmpty
+        let attachments = lastUser?.attachments ?? []
+        isAnalyzingMedia = !attachments.isEmpty
 
         generationTask = Task { [weak self] in
             guard let self else { return }
@@ -201,18 +218,23 @@ final class ChatSession {
                 return
             }
             do {
+                // Resolve attachments to either DIRECT engine media (when the
+                // main model is itself multimodal, e.g. E2B) or SIDECAR text
+                // (whisper transcription / SmolVLM description) folded into the
+                // prompt when the main model is text-only (iPhone 11 tier).
+                let resolved = try await self.resolveMedia(
+                    attachments, userText: lastUser?.content ?? "")
+
                 var history = self.trimmedHistory()
-                // Media turn: the engine replaces one marker per attachment
-                // with encoded image/audio chunks (mtmd_tokenize); markers
-                // exist only in the prompt, never in persisted content.
-                if !mediaData.isEmpty, let lastIndex = history.lastIndex(where: { $0.role == "user" }) {
-                    let markers = String(repeating: InferenceEngine.mediaMarker, count: mediaData.count)
-                    history[lastIndex].content = markers + (lastUser?.content ?? "")
+                if let lastIndex = history.lastIndex(where: { $0.role == "user" }) {
+                    let markers = String(repeating: InferenceEngine.mediaMarker,
+                                         count: resolved.directMedia.count)
+                    history[lastIndex].content = markers + resolved.promptText
                 }
                 let prompt = try await self.engine.applyChatTemplate(history)
                 for try await piece in self.engine.generate(
                     prompt: prompt,
-                    media: mediaData,
+                    media: resolved.directMedia,
                     maxNewTokens: Int32(self.settings.maxNewTokens)) {
                     self.isAnalyzingMedia = false
                     self.streamingText += piece
@@ -233,6 +255,50 @@ final class ChatSession {
 
             await self.generateTitleIfDue(for: chat)
         }
+    }
+
+    private struct ResolvedMedia {
+        var directMedia: [Data] = []   // fed straight to a multimodal main model
+        var promptText: String         // user text, augmented by sidecar output
+    }
+
+    /// Decide, per attachment, between the main model's own multimodal path
+    /// and the sidecar specialists, and assemble what the prompt needs.
+    private func resolveMedia(_ attachments: [Attachment], userText: String) async throws -> ResolvedMedia {
+        let caps = capabilities
+        var result = ResolvedMedia(promptText: userText)
+        var contextBlocks: [String] = []
+        var transcripts: [String] = []
+
+        for attachment in attachments {
+            switch attachment.kind {
+            case .image:
+                if caps?.hasVision == true, let data = store.attachmentData(attachment) {
+                    result.directMedia.append(data)
+                } else if let data = store.attachmentData(attachment) {
+                    let description = try await VisionDescriber.shared.describe(
+                        imageData: data, userQuestion: userText)
+                    contextBlocks.append("[Photo the user shared — description: \(description)]")
+                }
+            case .audio:
+                if caps?.hasAudio == true, let data = store.attachmentData(attachment) {
+                    result.directMedia.append(data)
+                } else if let url = store.attachmentURL(attachment) {
+                    let transcript = try await WhisperTranscriber.shared.transcribe(fileURL: url)
+                    if !transcript.isEmpty { transcripts.append(transcript) }
+                }
+            }
+        }
+
+        // Voice notes become (part of) the user's message; image descriptions
+        // are prepended as grounding context the text model can reason over.
+        var pieces: [String] = []
+        if !contextBlocks.isEmpty { pieces.append(contextBlocks.joined(separator: "\n")) }
+        let spoken = transcripts.joined(separator: " ")
+        let combinedUser = [userText, spoken].filter { !$0.isEmpty }.joined(separator: " ")
+        if !combinedUser.isEmpty { pieces.append(combinedUser) }
+        result.promptText = pieces.joined(separator: "\n\n")
+        return result
     }
 
     // MARK: - Model-generated chat title

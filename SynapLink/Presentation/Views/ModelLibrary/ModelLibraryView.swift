@@ -11,14 +11,28 @@ import SwiftUI
 struct ModelLibraryView: View {
     @State private var manager = ModelDownloadManager.shared
 
+    @State private var specialists = SpecialistManager.shared
+
     var body: some View {
         List {
             Section {
                 ForEach(ModelConfiguration.allCases) { config in
                     ModelLibraryCard(config: config)
                 }
+            } header: {
+                Text("Chat model")
             } footer: {
                 Text("Models download once from Hugging Face and never leave your device. All chat runs fully offline.")
+            }
+
+            Section {
+                ForEach(SpecialistModel.allCases) { model in
+                    SpecialistCard(model: model)
+                }
+            } header: {
+                Text("Add-on capabilities")
+            } footer: {
+                Text("Small helpers that add voice and photo input to any chat model — ideal where the full multimodal model is too large. Speech is transcribed and photos are described on-device, then handed to your chat model.")
             }
 
             Section("Storage") {
@@ -193,6 +207,84 @@ struct ModelLibraryCard: View {
         manager.selectedConfig = config
         // Different weights ⇒ the loaded engine is stale.
         Task { await ChatSession.shared.unloadEngine() }
+    }
+}
+
+/// Download card for a sidecar specialist (Speech / Image Understanding).
+struct SpecialistCard: View {
+    let model: SpecialistModel
+
+    @State private var manager = SpecialistManager.shared
+
+    private var state: ModelDownloadState { manager.states[model] ?? .notDownloaded }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: model.iconName)
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.rawValue).font(.headline)
+                    Text(model.tagline).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if case .ready = state {
+                    Label("Ready", systemImage: "checkmark.circle.fill")
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(.green)
+                }
+            }
+            stateRow
+        }
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private var stateRow: some View {
+        switch state {
+        case .notDownloaded:
+            Button {
+                manager.startDownload(model)
+            } label: {
+                Label("Download · \(Int(model.estimatedSizeMB)) MB", systemImage: "arrow.down.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(manager.anyActive)
+
+        case .downloading(let progress):
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: progress)
+                HStack {
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Pause") { manager.pauseDownload() }.font(.caption)
+                }
+            }
+
+        case .paused(let progress):
+            HStack {
+                ProgressView(value: progress).tint(.orange)
+                Button("Resume") { manager.resumeDownload(model) }.font(.caption)
+            }
+
+        case .ready:
+            HStack {
+                Spacer()
+                Button("Delete", role: .destructive) { manager.deleteModel(model) }
+                    .font(.caption)
+            }
+
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 4) {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.red)
+                Button("Retry") { manager.startDownload(model) }.buttonStyle(.bordered)
+            }
+        }
     }
 }
 

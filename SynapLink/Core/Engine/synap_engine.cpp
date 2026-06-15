@@ -20,10 +20,24 @@
 #include <llama/mtmd-helper.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 
 // MARK: - §1 Lifecycle
+
+// Refcount the global llama backend so multiple engines can coexist (main
+// text model + an on-demand vision specialist). Without this, freeing one
+// engine's backend would pull the rug out from under the other.
+static std::atomic<int> g_backend_refcount{0};
+
+static void backend_retain() {
+    if (g_backend_refcount.fetch_add(1) == 0) { llama_backend_init(); }
+}
+
+static void backend_release() {
+    if (g_backend_refcount.fetch_sub(1) == 1) { llama_backend_free(); }
+}
 
 SynapEngineParams synap_engine_params_default(void) {
     SynapEngineParams p = {};
@@ -64,14 +78,14 @@ static llama_sampler* build_sampler(const SynapEngineParams& p) {
 SynapEngine* synap_engine_create(const SynapEngineParams* params) {
     if (!params || !params->model_path) { return nullptr; }
 
-    llama_backend_init();
+    backend_retain();
 
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers       = params->n_gpu_layers;
 
     llama_model* model = llama_model_load_from_file(params->model_path, mp);
     if (!model) {
-        llama_backend_free();
+        backend_release();
         return nullptr;
     }
 
@@ -87,7 +101,7 @@ SynapEngine* synap_engine_create(const SynapEngineParams* params) {
     llama_context* ctx = llama_init_from_model(model, cp);
     if (!ctx) {
         llama_model_free(model);
-        llama_backend_free();
+        backend_release();
         return nullptr;
     }
 
@@ -95,7 +109,7 @@ SynapEngine* synap_engine_create(const SynapEngineParams* params) {
     if (!sampler) {
         llama_free(ctx);
         llama_model_free(model);
-        llama_backend_free();
+        backend_release();
         return nullptr;
     }
 
@@ -113,7 +127,7 @@ SynapEngine* synap_engine_create(const SynapEngineParams* params) {
             llama_sampler_free(sampler);
             llama_free(ctx);
             llama_model_free(model);
-            llama_backend_free();
+            backend_release();
             return nullptr;
         }
     }
@@ -132,7 +146,7 @@ void synap_engine_free(SynapEngine* engine) {
     if (engine->sampler) { llama_sampler_free(engine->sampler); }
     if (engine->ctx) { llama_free(engine->ctx); }
     if (engine->model) { llama_model_free(engine->model); }
-    llama_backend_free();
+    backend_release();
     delete engine;
 }
 

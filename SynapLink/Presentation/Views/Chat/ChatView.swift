@@ -28,8 +28,8 @@ struct ChatView: View {
             attachmentChip
             ChatInputBar(
                 draft: $draft,
-                supportsVision: session.capabilities?.hasVision ?? false,
-                supportsAudio: session.capabilities?.hasAudio ?? false,
+                supportsVision: session.canSendImages,
+                supportsAudio: session.canSendAudio,
                 isGenerating: session.isGenerating,
                 canSend: session.engineState != .loading,
                 onSend: sendDraft,
@@ -76,7 +76,7 @@ struct ChatView: View {
             }
         }
         .fullScreenCover(isPresented: $showVoiceMode) {
-            ImmersiveAudioView(sampleRate: session.capabilities?.audioSampleRate ?? 16000) { wav in
+            ImmersiveAudioView(sampleRate: session.audioCaptureSampleRate) { wav in
                 showVoiceMode = false
                 if let wav {
                     session.send(draft, attachments: [.init(kind: .audio, data: wav)])

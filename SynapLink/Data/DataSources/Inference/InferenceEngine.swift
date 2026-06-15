@@ -53,17 +53,21 @@ struct EngineCapabilities: Sendable {
 
 final class InferenceEngine: @unchecked Sendable {
 
+    /// The main chat engine (the model the user talks to). On-demand
+    /// specialists (e.g. the SmolVLM vision describer) create their own
+    /// transient instances — the C backend is refcounted so they coexist.
     static let shared = InferenceEngine()
 
-    private let queue = DispatchQueue(
-        label: "com.dedicatus.synaplink.inference", qos: .userInitiated)
+    private let queue: DispatchQueue
     private let handleLock = NSLock()
     private var _handle: OpaquePointer?
 
     /// The media marker the prompt must contain once per media attachment.
     static var mediaMarker: String { String(cString: synap_engine_media_marker()) }
 
-    private init() {}
+    init(label: String = "com.dedicatus.synaplink.inference") {
+        queue = DispatchQueue(label: label, qos: .userInitiated)
+    }
 
     deinit {
         if let h = currentHandle() { synap_engine_free(h) }
