@@ -281,6 +281,9 @@ final class ChatSession {
                                          count: resolved.directMedia.count)
                     history[lastIndex].content = markers + resolved.promptText
                 }
+                if !attachments.isEmpty {
+                    slog("media turn → \(resolved.directMedia.count) direct, user text: \"\(resolved.promptText)\"", .info)
+                }
                 let prompt = try await self.engine.applyChatTemplate(history)
                 for try await piece in self.engine.generate(
                     prompt: prompt,
@@ -336,6 +339,7 @@ final class ChatSession {
                     result.directMedia.append(data)
                 } else if let url = store.attachmentURL(attachment) {
                     let transcript = try await WhisperTranscriber.shared.transcribe(fileURL: url)
+                    slog("voice transcript: \"\(transcript)\"", transcript.isEmpty ? .warning : .info)
                     if !transcript.isEmpty { transcripts.append(transcript) }
                 }
             }

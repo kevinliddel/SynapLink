@@ -40,12 +40,19 @@ final class WhisperTranscriber: @unchecked Sendable {
         guard let model = SpecialistModel.whisper.modelURL() else {
             throw WhisperError.modelNotInstalled
         }
+        let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let fileBytes = (attrs?[.size] as? Int) ?? 0
         let samples = try Self.decodeToMono16kFloat(url: fileURL)
+        let peak = samples.map { abs($0) }.max() ?? 0
+        slog("whisper input: \(fileBytes) B file → \(samples.count) samples, "
+            + "peak \(String(format: "%.3f", peak)), gpu=\(RuntimeProfile.specialistUsesGPU)",
+            samples.isEmpty || peak < 0.001 ? .warning : .info)
 
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 guard let handle = synap_whisper_create(
                     model.path, RuntimeProfile.specialistUsesGPU, RuntimeProfile.specialistThreads) else {
+                    slog("whisper model load failed", .error)
                     continuation.resume(throwing: WhisperError.loadFailed)
                     return
                 }
