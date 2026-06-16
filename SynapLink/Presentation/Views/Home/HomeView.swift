@@ -14,6 +14,7 @@ struct HomeView: View {
     @State private var downloadManager = ModelDownloadManager.shared
     @State private var specialists = SpecialistManager.shared
     @State private var router = AppRouter.shared
+    @State private var topicSuggester = TopicSuggester.shared
     @State private var showModelLibrary = false
     @State private var showImageGen = false
     @State private var showHistory = false
@@ -26,7 +27,7 @@ struct HomeView: View {
 
     private let columns = [
         GridItem(.flexible(), spacing: 16),
-        GridItem(.flexible(), spacing: 16),
+        GridItem(.flexible(), spacing: 16)
     ]
 
     var body: some View {
@@ -38,6 +39,9 @@ struct HomeView: View {
                         .font(.title.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
                     cards
+                    if hasModel, topicSuggester.isLoading || !topicSuggester.topics.isEmpty {
+                        topicsSection
+                    }
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -84,6 +88,7 @@ struct HomeView: View {
             .onAppear {
                 downloadManager.refreshStates()
                 specialists.refreshStates()
+                topicSuggester.loadIfNeeded()
             }
         }
     }
@@ -122,12 +127,111 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Popular topics
+
+    private static let topicIcons = [
+        "sparkles", "lightbulb.fill", "globe.americas.fill",
+        "atom", "book.fill", "brain.head.profile"
+    ]
+
+    private var topicsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Popular topics")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    topicSuggester.refresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .disabled(topicSuggester.isLoading)
+                .accessibilityLabel("Shuffle topics")
+            }
+
+            if topicSuggester.topics.isEmpty {
+                ForEach(0..<4, id: \.self) { _ in TopicSkeletonRow() }
+            } else {
+                ForEach(Array(topicSuggester.topics.enumerated()), id: \.element) { index, topic in
+                    TopicRow(topic: topic, icon: Self.topicIcons[index % Self.topicIcons.count]) {
+                        openTopic(topic)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
     // MARK: - Actions
 
     private func startImageGeneration(_ prompt: String) {
         guard let chat = ChatSession.shared.startNewChat() else { return }
         ChatSession.shared.createImage(prompt: prompt)
         router.openChat(chat)
+    }
+
+    /// Open a fresh chat seeded with a request to explore the tapped topic.
+    private func openTopic(_ topic: String) {
+        guard let chat = ChatSession.shared.startNewChat() else { return }
+        router.openChat(chat)
+        ChatSession.shared.send("Tell me about \(topic).")
+    }
+}
+
+/// A tappable suggested-topic row: tinted icon, the topic, and a launch arrow.
+private struct TopicRow: View {
+    let topic: String
+    let icon: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.12), in: Circle())
+                Text(topic)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Skeleton placeholder shown (with shimmer) while topics generate.
+private struct TopicSkeletonRow: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color(.secondarySystemGroupedBackground))
+            .frame(height: 52)
+            .overlay(alignment: .leading) {
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(Color(.tertiarySystemFill))
+                        .frame(width: 30, height: 30)
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(.tertiarySystemFill))
+                        .frame(height: 12)
+                    Spacer(minLength: 60)
+                }
+                .padding(.horizontal, 14)
+                .shimmering()
+            }
     }
 }
 

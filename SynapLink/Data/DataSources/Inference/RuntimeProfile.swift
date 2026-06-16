@@ -11,6 +11,7 @@
 //
 
 import Foundation
+import Metal
 
 enum RuntimeProfile {
 
@@ -63,6 +64,28 @@ enum RuntimeProfile {
 
     static var specialistThreads: Int32 {
         Int32(min(2, ProcessInfo.processInfo.processorCount))
+    }
+
+    /// True when the default Metal GPU implements simdgroup matrix-multiply
+    /// (Apple7 / A14 / M1 and later). GPUs before that (e.g. the A13's Apple6)
+    /// make ggml-Metal fall back to kernels that miscompute — proven for us by
+    /// whisper's encoder there (garbage features → language auto-detect at
+    /// p≈0.27 → zero segments → empty transcript on iPhone 11).
+    private static let metalHasSimdgroupMatrix: Bool = {
+        guard let device = MTLCreateSystemDefaultDevice() else { return false }
+        return device.supportsFamily(.apple7)
+    }()
+
+    /// whisper.cpp on Metal needs simdgroup matrix-multiply for a correct
+    /// encoder; without it the transcript comes back empty. Run whisper on CPU
+    /// on those GPUs — it's a 147 MB base model and the CPU path transcribes a
+    /// few seconds of audio in ~1–2 s (the proven-correct desktop path).
+    static var whisperUsesGPU: Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        return metalHasSimdgroupMatrix
+        #endif
     }
 
     /// Image-generation (stable-diffusion.cpp) tunables per RAM tier. The

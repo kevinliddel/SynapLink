@@ -42,16 +42,24 @@ final class WhisperTranscriber: @unchecked Sendable {
         }
         let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
         let fileBytes = (attrs?[.size] as? Int) ?? 0
-        let samples = try Self.decodeToMono16kFloat(url: fileURL)
+        var samples = try Self.decodeToMono16kFloat(url: fileURL)
         let peak = samples.map { abs($0) }.max() ?? 0
         slog("whisper input: \(fileBytes) B file → \(samples.count) samples, "
-            + "peak \(String(format: "%.3f", peak)), gpu=\(RuntimeProfile.specialistUsesGPU)",
+            + "peak \(String(format: "%.3f", peak)), gpu=\(RuntimeProfile.whisperUsesGPU)",
             samples.isEmpty || peak < 0.001 ? .warning : .info)
+
+        // Normalize quiet recordings to a healthy level — whisper's encoder
+        // needs speech-level input; a low-amplitude clip yields zero segments.
+        if peak > 0.001 && peak < 0.7 {
+            let gain = 0.95 / peak
+            for index in samples.indices { samples[index] *= gain }
+            slog("whisper: boosted level ×\(String(format: "%.1f", gain))", .info)
+        }
 
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 guard let handle = synap_whisper_create(
-                    model.path, RuntimeProfile.specialistUsesGPU, RuntimeProfile.specialistThreads) else {
+                    model.path, RuntimeProfile.whisperUsesGPU, RuntimeProfile.specialistThreads) else {
                     slog("whisper model load failed", .error)
                     continuation.resume(throwing: WhisperError.loadFailed)
                     return
