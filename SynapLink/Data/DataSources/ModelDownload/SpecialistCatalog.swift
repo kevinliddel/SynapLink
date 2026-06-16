@@ -17,9 +17,9 @@
 import Foundation
 
 enum SpecialistModel: String, CaseIterable, Identifiable {
-    case whisper = "Speech to Text"
-    case vision = "Image Understanding"
-    case imageGen = "Image Creation"
+    case whisper = "Speech To Text"
+    case vision = "Image Explanation"
+    case imageGen = "Image Generation"
 
     var id: String { rawValue }
 
@@ -114,7 +114,8 @@ enum SpecialistModel: String, CaseIterable, Identifiable {
     }
 
     private func resolve(filename: String, key: String) -> URL? {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask)[0]
         if let relative = UserDefaults.standard.string(forKey: key) {
             let url = appSupport.appendingPathComponent(relative)
             if url.lastPathComponent == filename, FileManager.default.fileExists(atPath: url.path) {
@@ -122,8 +123,10 @@ enum SpecialistModel: String, CaseIterable, Identifiable {
             }
         }
         let snapshots = appSupport.appendingPathComponent("hub/\(hubSlug)/snapshots")
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: snapshots, includingPropertiesForKeys: nil) else { return nil }
+        guard
+            let entries = try? FileManager.default.contentsOfDirectory(
+                at: snapshots, includingPropertiesForKeys: nil)
+        else { return nil }
         for snapshot in entries.sorted(by: { $0.path > $1.path }) {
             let candidate = snapshot.appendingPathComponent(filename)
             if FileManager.default.fileExists(atPath: candidate.path) {
@@ -135,8 +138,10 @@ enum SpecialistModel: String, CaseIterable, Identifiable {
     }
 
     func persistPath(_ url: URL, key: String) {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        UserDefaults.standard.set(url.path.replacingOccurrences(of: appSupport.path + "/", with: ""), forKey: key)
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        UserDefaults.standard.set(
+            url.path.replacingOccurrences(of: appSupport.path + "/", with: ""), forKey: key)
     }
 
     func persistPaths(modelURL: URL, mmprojURL: URL?) {

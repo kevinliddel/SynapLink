@@ -86,6 +86,7 @@ final class ModelDownloadManager {
         activeConfig = config
         states[config] = .downloading(progress: 0)
         beginBackgroundTask()
+        slog("downloading \(config.rawValue) from \(config.repoID)", .info)
 
         activeTask = Task { [weak self] in
             do {
@@ -97,10 +98,12 @@ final class ModelDownloadManager {
                 }
                 guard !Task.isCancelled else { return }
                 self?.states[config] = config.isInstalled ? .ready : .failed("File missing after download")
+                slog("download finished: \(config.rawValue) installed=\(config.isInstalled)", .info)
             } catch is CancellationError {
                 // pause/cancel path — state already set by the caller
             } catch {
                 if !Task.isCancelled {
+                    slog("download failed for \(config.rawValue): \(error.localizedDescription)", .error)
                     self?.states[config] = .failed(error.localizedDescription)
                 }
             }

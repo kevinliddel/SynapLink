@@ -125,12 +125,15 @@ final class ChatSession {
         }
         let params = RuntimeProfile.engineParams(
             modelPath: modelURL.path, mmprojPath: config.mmprojURL()?.path)
+        slog("loading \(config.rawValue) (ctx \(params.nCtx), \(params.nThreads) threads, gpu=\(params.nGPULayers))", .info)
         do {
             let caps = try await engine.load(params)
             loadedNCtx = Int(caps.nCtx)
             capabilities = caps
             engineState = .ready(description: caps.modelDescription)
+            slog("engine ready: \(caps.modelDescription) — vision=\(caps.hasVision) audio=\(caps.hasAudio)", .info)
         } catch {
+            slog("engine load failed: \(error.localizedDescription)", .error)
             engineState = .failed(message: error.localizedDescription)
         }
     }
@@ -140,6 +143,7 @@ final class ChatSession {
         await engine.unload()
         capabilities = nil
         engineState = .unloaded
+        slog("engine unloaded", .debug)
     }
 
     // MARK: - Effective input capabilities (main model OR sidecar specialist)
@@ -238,6 +242,7 @@ final class ChatSession {
                     self.messages.append(saved)
                 }
             } catch {
+                slog("createImage failed: \(error.localizedDescription)", .error)
                 self.lastError = error.localizedDescription
             }
             self.isCreatingImage = false
@@ -276,6 +281,9 @@ final class ChatSession {
                                          count: resolved.directMedia.count)
                     history[lastIndex].content = markers + resolved.promptText
                 }
+                if !attachments.isEmpty {
+                    slog("media turn → \(resolved.directMedia.count) direct, user text: \"\(resolved.promptText)\"", .info)
+                }
                 let prompt = try await self.engine.applyChatTemplate(history)
                 for try await piece in self.engine.generate(
                     prompt: prompt,
@@ -285,6 +293,7 @@ final class ChatSession {
                     self.streamingText += piece
                 }
             } catch {
+                slog("generation failed: \(error.localizedDescription)", .error)
                 self.lastError = error.localizedDescription
             }
 
@@ -329,7 +338,11 @@ final class ChatSession {
                 if caps?.hasAudio == true, let data = store.attachmentData(attachment) {
                     result.directMedia.append(data)
                 } else if let url = store.attachmentURL(attachment) {
-                    let transcript = try await WhisperTranscriber.shared.transcribe(fileURL: url)
+                    // Force English (the proven desktop-test config) — auto-detect
+                    // lands at low confidence on short clips.
+                    let transcript = try await WhisperTranscriber.shared.transcribe(
+                        fileURL: url, languageCode: "en")
+                    slog("voice transcript: \"\(transcript)\"", transcript.isEmpty ? .warning : .info)
                     if !transcript.isEmpty { transcripts.append(transcript) }
                 }
             }
@@ -344,6 +357,54 @@ final class ChatSession {
         if !combinedUser.isEmpty { pieces.append(combinedUser) }
         result.promptText = pieces.joined(separator: "\n\n")
         return result
+    }
+
+    // MARK: - Home topic suggestions
+
+    /// Ask the model for a few short, varied topics to surface on Home. A
+    /// one-off generation that reuses the loaded engine (warming it for the
+    /// first real chat). Returns [] on any failure — purely decorative.
+    func suggestTopics(count: Int = 5) async -> [String] {
+        await ensureEngineLoaded()
+        guard case .ready = engineState, !isGenerating else { return [] }
+
+        let messages = [
+            ChatMessage(role: "system",
+                        content: "You suggest short, intriguing topics for an AI chat app."),
+            ChatMessage(role: "user",
+                        content: "List \(count) diverse topics someone might enjoy exploring with "
+                            + "an AI assistant — mix science, history, technology, culture, health, "
+                            + "and everyday curiosity. Each must be 2 to 5 words. No numbering, no "
+                            + "explanations, no end punctuation. Output exactly one topic per line.")
+        ]
+        guard let prompt = try? await engine.applyChatTemplate(messages) else { return [] }
+
+        var raw = ""
+        do {
+            for try await piece in engine.generate(prompt: prompt, maxNewTokens: 128) {
+                raw += piece
+            }
+        } catch {
+            return []  // decorative — never surface errors for it
+        }
+        return Self.parseTopics(raw, limit: count)
+    }
+
+    /// One topic per line, stripped of bullets/numbering/quotes; deduped.
+    static func parseTopics(_ raw: String, limit: Int) -> [String] {
+        var topics: [String] = []
+        for line in raw.split(whereSeparator: \.isNewline) {
+            var item = line.trimmingCharacters(in: .whitespaces)
+            item = item.replacingOccurrences(of: "^[-*•+]+\\s*", with: "", options: .regularExpression)
+            item = item.replacingOccurrences(of: "^\\d+[.)]\\s*", with: "", options: .regularExpression)
+            item = item.trimmingCharacters(in: CharacterSet(charactersIn: " \"'“”‘’.!,*#`:-"))
+            guard item.count >= 2, item.count <= 42 else { continue }
+            if !topics.contains(where: { $0.caseInsensitiveCompare(item) == .orderedSame }) {
+                topics.append(item)
+            }
+            if topics.count == limit { break }
+        }
+        return topics
     }
 
     // MARK: - Model-generated chat title

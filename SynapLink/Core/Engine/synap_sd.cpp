@@ -9,6 +9,7 @@
 
 #include <sd/stable-diffusion.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -16,12 +17,13 @@ struct SynapSD {
     sd_ctx_t* ctx = nullptr;
 };
 
-// stable-diffusion.cpp logs verbosely (per-step, per-tensor) to stderr by
-// default. Route everything to a no-op so it doesn't flood logs / temp space.
+// stable-diffusion.cpp logs verbosely at DEBUG/INFO (per-tensor) — drop those
+// so they don't flood logs / temp space. WARN/ERROR are forwarded to stderr:
+// they carry the reason for failures and aborts (out-of-memory, unsupported
+// op, etc.), which is essential for diagnosing on-device crashes.
 static void sd_silent_log(enum sd_log_level_t level, const char* text, void* data) {
-    (void)level;
-    (void)text;
     (void)data;
+    if (level >= SD_LOG_WARN && text) { fputs(text, stderr); }
 }
 
 static void sd_silent_progress(int step, int steps, float time, void* data) {

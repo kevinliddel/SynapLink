@@ -81,6 +81,7 @@ final class VisionDescriber: @unchecked Sendable {
             }
             let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { throw VisionError.describeFailed }
+            slog("vision described image → \(trimmed.count) chars", .info)
             return trimmed
         } catch let error as VisionError {
             throw error

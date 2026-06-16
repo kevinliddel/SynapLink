@@ -29,7 +29,11 @@ final class VoiceRecorder {
 
     func start(sampleRate: Int32) throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement)
+        // `.measurement` disables the input-gain conditioning, which on iPhone
+        // yields very quiet recordings (barely audible on playback, and too
+        // weak for whisper's encoder → empty transcript). `.default` keeps the
+        // standard mic processing/gain, giving speech-level audio.
+        try session.setCategory(.record, mode: .default)
         try session.setActive(true)
 
         let url = FileManager.default.temporaryDirectory

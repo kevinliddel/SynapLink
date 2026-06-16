@@ -29,7 +29,7 @@ jobs:
         run: scripts/lint-cpp.sh
 
   framework:
-    name: Build llama.xcframework (cached)
+    name: Build xcframeworks (cached)
     runs-on: macos-latest
     timeout-minutes: 120
     steps:
@@ -37,18 +37,39 @@ jobs:
         with:
           submodules: recursive
 
+      # Each build script embeds its own submodule tag/commit and build flags,
+      # so the script hash is the complete cache identity. The app target links
+      # all three xcframeworks (llama + whisper ASR + stable-diffusion), so CI
+      # must produce all three before building the app.
       - name: Cache llama.xcframework
-        id: fw-cache
+        id: llama-cache
         uses: actions/cache@v4
         with:
           path: Frameworks/llama.xcframework
-          # The build script embeds the llama.cpp tag and all build flags, so
-          # its hash is the complete cache identity.
           key: llama-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-llama-xcframework.sh') }}
-
-      - name: Build XCFramework
-        if: steps.fw-cache.outputs.cache-hit != 'true'
+      - name: Build llama.xcframework
+        if: steps.llama-cache.outputs.cache-hit != 'true'
         run: scripts/build-llama-xcframework.sh
+
+      - name: Cache whisper.xcframework
+        id: whisper-cache
+        uses: actions/cache@v4
+        with:
+          path: Frameworks/whisper.xcframework
+          key: whisper-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-whisper-xcframework.sh') }}
+      - name: Build whisper.xcframework
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        run: scripts/build-whisper-xcframework.sh
+
+      - name: Cache sd.xcframework
+        id: sd-cache
+        uses: actions/cache@v4
+        with:
+          path: Frameworks/sd.xcframework
+          key: sd-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-sd-xcframework.sh') }}
+      - name: Build sd.xcframework
+        if: steps.sd-cache.outputs.cache-hit != 'true'
+        run: scripts/build-sd-xcframework.sh
 
   engine-test:
     name: Engine smoke test (macOS)
@@ -92,11 +113,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The app target links all three xcframeworks — restore each from the
+      # cache the `framework` job populated.
       - name: Restore llama.xcframework
         uses: actions/cache/restore@v4
         with:
           path: Frameworks/llama.xcframework
           key: llama-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-llama-xcframework.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Restore whisper.xcframework
+        uses: actions/cache/restore@v4
+        with:
+          path: Frameworks/whisper.xcframework
+          key: whisper-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-whisper-xcframework.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Restore sd.xcframework
+        uses: actions/cache/restore@v4
+        with:
+          path: Frameworks/sd.xcframework
+          key: sd-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-sd-xcframework.sh') }}
           fail-on-cache-miss: true
 
       - name: Cache test model
