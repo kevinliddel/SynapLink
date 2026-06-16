@@ -338,7 +338,10 @@ final class ChatSession {
                 if caps?.hasAudio == true, let data = store.attachmentData(attachment) {
                     result.directMedia.append(data)
                 } else if let url = store.attachmentURL(attachment) {
-                    let transcript = try await WhisperTranscriber.shared.transcribe(fileURL: url)
+                    // Force English (the proven desktop-test config) — auto-detect
+                    // lands at low confidence on short clips.
+                    let transcript = try await WhisperTranscriber.shared.transcribe(
+                        fileURL: url, languageCode: "en")
                     slog("voice transcript: \"\(transcript)\"", transcript.isEmpty ? .warning : .info)
                     if !transcript.isEmpty { transcripts.append(transcript) }
                 }
