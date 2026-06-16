@@ -26,7 +26,7 @@ struct HomeView: View {
 
     private let columns = [
         GridItem(.flexible(), spacing: 16),
-        GridItem(.flexible(), spacing: 16)
+        GridItem(.flexible(), spacing: 16),
     ]
 
     var body: some View {
@@ -34,8 +34,8 @@ struct HomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     greeting
-                    Text("How may I help\nyou today?")
-                        .font(.largeTitle.weight(.semibold))
+                    Text("How may I help you?")
+                        .font(.title.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
                     cards
                 }
@@ -49,7 +49,7 @@ struct HomeView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        router.tab = .settings   // profile lives in Settings (photo lands in Phase 4)
+                        router.tab = .settings  // profile lives in Settings (photo lands in Phase 4)
                     } label: {
                         Image(systemName: "person.crop.circle")
                             .font(.title2)
@@ -91,12 +91,12 @@ struct HomeView: View {
     // MARK: - Greeting
 
     private var greeting: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("Hello,")
                 .font(.title3)
                 .foregroundStyle(.secondary)
             Text(userName)
-                .font(.title.weight(.bold))
+                .font(.title2.weight(.bold))
         }
     }
 
@@ -106,7 +106,7 @@ struct HomeView: View {
     private var cards: some View {
         LazyVGrid(columns: columns, spacing: 16) {
             if hasModel {
-                HomeCard(title: "Chat", icon: "bubble.left.fill", tint: .blue) {
+                HomeCard(title: "Chat", icon: "bubble.right.fill", tint: .red) {
                     router.openNewChat()
                 }
                 if hasImageGen {
