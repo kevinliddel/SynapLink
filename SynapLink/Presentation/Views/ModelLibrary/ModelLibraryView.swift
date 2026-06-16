@@ -26,9 +26,13 @@ struct ModelLibraryView: View {
             }
 
             Section {
-                ForEach(SpecialistModel.allCases) { model in
-                    SpecialistCard(model: model)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 12) {
+                    ForEach(SpecialistModel.allCases) { model in
+                        SpecialistTile(model: model)
+                    }
                 }
+                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                .listRowBackground(Color.clear)
             } header: {
                 Text("Add-on capabilities")
             } footer: {
@@ -211,80 +215,118 @@ struct ModelLibraryCard: View {
     }
 }
 
-/// Download card for a sidecar specialist (Speech / Image Understanding).
-struct SpecialistCard: View {
+/// Compact grid tile for a sidecar specialist (Speech / Vision / Image-gen).
+/// Tapping runs the primary action for the current state (download / pause /
+/// resume / retry); when installed, a context menu offers Delete.
+struct SpecialistTile: View {
     let model: SpecialistModel
 
     @State private var manager = SpecialistManager.shared
 
     private var state: ModelDownloadState { manager.states[model] ?? .notDownloaded }
+    private var installed: Bool { if case .ready = state { return true } else { return false } }
+    private var supported: Bool { model.isSupportedOnThisDevice }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Image(systemName: model.iconName)
-                    .font(.title2)
-                    .foregroundStyle(.tint)
-                    .frame(width: 34)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(model.rawValue).font(.headline)
-                    Text(model.tagline).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if case .ready = state {
-                    Label("Ready", systemImage: "checkmark.circle.fill")
-                        .labelStyle(.iconOnly)
-                        .foregroundStyle(.green)
+        VStack(spacing: 8) {
+            icon
+            Text(model.rawValue)
+                .font(.caption.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity)
+            statusLine
+        }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, minHeight: 138)
+        .background(Color(.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .opacity(supported ? 1 : 0.6)
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture { primaryAction() }
+        .contextMenu {
+            if installed {
+                Button(role: .destructive) {
+                    manager.deleteModel(model)
+                } label: {
+                    Label("Delete", systemImage: "trash")
                 }
             }
-            stateRow
         }
-        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var icon: some View {
+        Image(systemName: model.iconName)
+            .font(.system(size: 20, weight: .medium))
+            .foregroundStyle(.white)
+            .frame(width: 48, height: 48)
+            .background((installed ? Color.green : Color.accentColor).gradient, in: Circle())
     }
 
     @ViewBuilder
-    private var stateRow: some View {
+    private var statusLine: some View {
         switch state {
         case .notDownloaded:
-            Button {
-                manager.startDownload(model)
-            } label: {
-                Label("Download · \(Int(model.estimatedSizeMB)) MB", systemImage: "arrow.down.circle")
-                    .frame(maxWidth: .infinity)
+            if supported {
+                pill("\(Int(model.estimatedSizeMB)) MB", system: "arrow.down", tint: .accentColor)
+            } else {
+                Text("Needs \(Int(model.requiredRAMGB)) GB")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
-            .buttonStyle(.bordered)
-            .disabled(manager.anyActive)
 
         case .downloading(let progress):
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(spacing: 4) {
                 ProgressView(value: progress)
-                HStack {
-                    Text("\(Int(progress * 100))%")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Pause") { manager.pauseDownload() }.font(.caption)
-                }
+                Text("\(Int(progress * 100))% · tap to pause")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity)
 
         case .paused(let progress):
-            HStack {
+            VStack(spacing: 4) {
                 ProgressView(value: progress).tint(.orange)
-                Button("Resume") { manager.resumeDownload(model) }.font(.caption)
+                Text("Paused · tap to resume")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity)
 
         case .ready:
-            HStack {
-                Spacer()
-                Button("Delete", role: .destructive) { manager.deleteModel(model) }
-                    .font(.caption)
-            }
+            Label("Installed", systemImage: "checkmark.circle.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.green)
 
-        case .failed(let message):
-            VStack(alignment: .leading, spacing: 4) {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.red)
-                Button("Retry") { manager.startDownload(model) }.buttonStyle(.bordered)
-            }
+        case .failed:
+            Label("Retry", systemImage: "arrow.clockwise")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func pill(_ text: String, system: String, tint: Color) -> some View {
+        Label(text, systemImage: system)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(tint.opacity(0.15), in: Capsule())
+            .foregroundStyle(tint)
+    }
+
+    private func primaryAction() {
+        switch state {
+        case .notDownloaded where supported, .failed:
+            manager.startDownload(model)
+        case .downloading:
+            manager.pauseDownload()
+        case .paused:
+            manager.resumeDownload(model)
+        default:
+            break
         }
     }
 }

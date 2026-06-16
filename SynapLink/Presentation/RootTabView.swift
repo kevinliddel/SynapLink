@@ -12,6 +12,7 @@ import SwiftUI
 
 struct RootTabView: View {
     @State private var router = AppRouter.shared
+    @State private var appearance = AppearanceSettings.shared
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -30,6 +31,7 @@ struct RootTabView: View {
             }
         }
         .animation(.smooth(duration: 0.38), value: router.presentedChat?.id)
+        .preferredColorScheme(appearance.mode.colorScheme)
     }
 
     @ViewBuilder
