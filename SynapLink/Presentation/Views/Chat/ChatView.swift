@@ -129,6 +129,13 @@ struct ChatView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: action)
     }
 
+    /// Regenerate is offered only on the latest assistant reply, when idle.
+    private func canRegenerate(_ message: Message) -> Bool {
+        message.role == .assistant
+            && message.id == session.messages.last?.id
+            && !session.isGenerating
+    }
+
     private func sendDraft() {
         let text = draft
         let attachments: [PendingAttachment] =
@@ -177,19 +184,10 @@ struct ChatView: View {
                         emptyHint
                     }
                     ForEach(session.messages) { message in
-                        MessageBubble(message: message)
+                        MessageBubble(
+                            message: message,
+                            onRegenerate: canRegenerate(message) ? { session.regenerate() } : nil)
                             .id(message.id)
-                            .contextMenu {
-                                if message.id == session.messages.last?.id,
-                                   message.role == .assistant, !session.isGenerating {
-                                    Button("Regenerate", systemImage: "arrow.clockwise") {
-                                        session.regenerate()
-                                    }
-                                }
-                                Button("Copy", systemImage: "doc.on.doc") {
-                                    UIPasteboard.general.string = message.content
-                                }
-                            }
                     }
                     if session.isGenerating {
                         if session.isAnalyzingMedia && session.streamingText.isEmpty {

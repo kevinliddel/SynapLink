@@ -2,10 +2,11 @@
 //  MessageBubble.swift
 //  SynapLink
 //
-//  One chat message. Assistant text renders inline markdown (bold, italics,
-//  code, links) via AttributedString — block elements (headings, lists)
-//  arrive as separate lines and read fine as styled text on Phase 1's
-//  baseline; a full markdown layout engine is deliberately out of scope.
+//  One chat message. The user's turn is a compact accent-colored bubble
+//  (right-aligned, any image shown above it); the assistant's reply is a
+//  full-width card with an action row (copy / read-aloud / regenerate).
+//  Assistant text renders block markdown when settled, smoothly-revealed plain
+//  text while streaming.
 //
 
 import SwiftUI
@@ -15,21 +16,112 @@ struct MessageBubble: View {
     let text: String
     var isStreaming = false
     var attachments: [Attachment] = []
+    /// Non-nil on the latest assistant reply → shows the regenerate action.
+    var onRegenerate: (() -> Void)?
+
+    @State private var speech = SpeechReader.shared
+    @State private var preview: PreviewImage?
 
     var body: some View {
-        HStack {
-            if role == .user { Spacer(minLength: 48) }
-            VStack(alignment: .leading, spacing: 8) {
-                attachmentViews
-                content
+        Group {
+            if role == .user {
+                userMessage
+            } else {
+                assistantMessage
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(background)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            if role == .assistant { Spacer(minLength: 48) }
+        }
+        .fullScreenCover(item: $preview) { ImageViewer(image: $0.image) }
+    }
+
+    // MARK: - User
+
+    /// Rounded on three corners; the bottom-trailing corner is squared off so
+    /// the bubble reads as the sender's (points to the right edge).
+    private static let userBubbleShape = UnevenRoundedRectangle(
+        topLeadingRadius: 22, bottomLeadingRadius: 22,
+        bottomTrailingRadius: 4, topTrailingRadius: 22, style: .continuous)
+
+    private var userMessage: some View {
+        HStack {
+            Spacer(minLength: 40)
+            VStack(alignment: .trailing, spacing: 8) {
+                attachmentViews
+                if !text.isEmpty {
+                    Text(MarkdownText.inline(text))
+                        .foregroundStyle(.white)
+                        .tint(.white)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 11)
+                        .background(Color.accentColor.gradient, in: Self.userBubbleShape)
+                }
+            }
         }
     }
+
+    // MARK: - Assistant
+
+    private var assistantMessage: some View {
+        // Image sits OUTSIDE the card (left-aligned, like the user's image);
+        // only the text/actions live in the full-width card.
+        VStack(alignment: .leading, spacing: 8) {
+            attachmentViews
+            if hasText || isStreaming {
+                textCard
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var textCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            content
+            if showActions {
+                Divider()
+                actionRow
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var hasText: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showActions: Bool {
+        role == .assistant && !isStreaming && hasText
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 22) {
+            iconButton("doc.on.doc", "Copy") { UIPasteboard.general.string = text }
+            iconButton(speech.isSpeaking(text) ? "stop.fill" : "speaker.wave.2",
+                       "Read aloud") { speech.toggle(text) }
+            Spacer()
+            if let onRegenerate {
+                iconButton("arrow.clockwise", "Regenerate", action: onRegenerate)
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func iconButton(_ systemName: String, _ label: String,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.tint)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: - Attachments & content
 
     @ViewBuilder
     private var attachmentViews: some View {
@@ -38,11 +130,18 @@ struct MessageBubble: View {
             case .image:
                 if let url = ChatStore.shared.attachmentURL(attachment),
                    let image = UIImage(contentsOfFile: url.path) {
+                    // Width-only constraint so the frame HUGS the image (a 2-D
+                    // frame + scaledToFit would letterbox, rounding the empty
+                    // box instead of the picture).
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                        .frame(maxHeight: 220)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .frame(maxWidth: 240)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .onTapGesture { preview = PreviewImage(image: image) }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityLabel("Open image")
                 }
             case .audio:
                 if let url = ChatStore.shared.attachmentURL(attachment) {
@@ -60,28 +159,16 @@ struct MessageBubble: View {
             TypingIndicator()
         } else if text.isEmpty {
             EmptyView()
-        } else if role == .assistant {
-            if isStreaming {
-                // Plain, smoothly-revealed text while generating — markdown is
-                // applied once the reply settles (avoids per-token reflow).
-                StreamingText(fullText: text)
-            } else {
-                // Block markdown: fenced code with copy button, headings, inline styles.
-                MarkdownText(text: text)
-                    .textSelection(.enabled)
-                    .transition(.opacity)
-            }
+        } else if isStreaming {
+            // Plain, smoothly-revealed text while generating — markdown is
+            // applied once the reply settles (avoids per-token reflow).
+            StreamingText(fullText: text)
         } else {
-            Text(MarkdownText.inline(text))
+            // Block markdown: fenced code with copy button, headings, inline styles.
+            MarkdownText(text: text)
                 .textSelection(.enabled)
-                .tint(.white)
+                .transition(.opacity)
         }
-    }
-
-    private var background: some ShapeStyle {
-        role == .user
-            ? AnyShapeStyle(Color.accentColor)
-            : AnyShapeStyle(Color(.secondarySystemBackground))
     }
 }
 
@@ -107,19 +194,30 @@ struct TypingIndicator: View {
     }
 }
 
+/// A tapped image being shown full-screen (Identifiable for `fullScreenCover`).
+private struct PreviewImage: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
 extension MessageBubble {
-    init(message: Message) {
+    init(message: Message, onRegenerate: (() -> Void)? = nil) {
         self.init(role: message.role,
                   text: message.content,
-                  attachments: message.attachments)
+                  attachments: message.attachments,
+                  onRegenerate: onRegenerate)
     }
 }
 
 #Preview {
-    VStack(spacing: 12) {
-        MessageBubble(role: .user, text: "Why is the sky **blue**?")
-        MessageBubble(role: .assistant, text: "Because of *Rayleigh scattering* — shorter `wavelengths` scatter more.")
-        MessageBubble(role: .assistant, text: "", isStreaming: true)
+    ScrollView {
+        VStack(spacing: 12) {
+            MessageBubble(role: .user, text: "Why is the sky **blue**?")
+            MessageBubble(role: .assistant,
+                          text: "Because of *Rayleigh scattering* — shorter `wavelengths` scatter more.",
+                          onRegenerate: {})
+            MessageBubble(role: .assistant, text: "", isStreaming: true)
+        }
+        .padding()
     }
-    .padding()
 }
