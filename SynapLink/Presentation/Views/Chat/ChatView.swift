@@ -24,6 +24,7 @@ struct ChatView: View {
     @State private var showImageGen = false
     @State private var specialists = SpecialistManager.shared
     @State private var viewportHeight: CGFloat = 0
+    @FocusState private var inputFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,7 +40,8 @@ struct ChatView: View {
                 onSend: sendDraft,
                 onStop: { session.stop() },
                 onCamera: { showAttachDialog = true },
-                onVoice: { showVoiceMode = true })
+                onVoice: { showVoiceMode = true },
+                focused: $inputFocused)
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -127,6 +129,13 @@ struct ChatView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: action)
     }
 
+    /// Regenerate is offered only on the latest assistant reply, when idle.
+    private func canRegenerate(_ message: Message) -> Bool {
+        message.role == .assistant
+            && message.id == session.messages.last?.id
+            && !session.isGenerating
+    }
+
     private func sendDraft() {
         let text = draft
         let attachments: [PendingAttachment] =
@@ -175,25 +184,17 @@ struct ChatView: View {
                         emptyHint
                     }
                     ForEach(session.messages) { message in
-                        MessageBubble(message: message)
+                        MessageBubble(
+                            message: message,
+                            onRegenerate: canRegenerate(message) ? { session.regenerate() } : nil)
                             .id(message.id)
-                            .contextMenu {
-                                if message.id == session.messages.last?.id,
-                                   message.role == .assistant, !session.isGenerating {
-                                    Button("Regenerate", systemImage: "arrow.clockwise") {
-                                        session.regenerate()
-                                    }
-                                }
-                                Button("Copy", systemImage: "doc.on.doc") {
-                                    UIPasteboard.general.string = message.content
-                                }
-                            }
                     }
                     if session.isGenerating {
                         if session.isAnalyzingMedia && session.streamingText.isEmpty {
                             analyzingIndicator
                         } else {
                             MessageBubble(role: .assistant, text: session.streamingText, isStreaming: true)
+                                .id("streaming")
                         }
                     }
                     if session.isCreatingImage {
@@ -222,6 +223,22 @@ struct ChatView: View {
                         proxy.scrollTo(last.id, anchor: .top)
                     }
                 }
+            }
+            .onChange(of: session.streamingText) {
+                // Follow the streaming reply: keep its latest line just above the
+                // input bar. While the reply is short this clamps to the top (the
+                // user message stays pinned); once it fills the screen it scrolls.
+                proxy.scrollTo("streaming", anchor: .bottom)
+            }
+            .onChange(of: session.isGenerating) { _, generating in
+                // Reply finished: settle the scroll on it and open the keyboard so
+                // the next message can be typed straight away. The bottom spacer
+                // has collapsed, so scroll explicitly to the final bubble.
+                guard !generating, let last = session.messages.last else { return }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+                inputFocused = true
             }
             .onAppear {
                 if let last = session.messages.last {

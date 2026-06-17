@@ -296,9 +296,15 @@ static bool prefill_text(SynapEngine* h, const std::vector<llama_token>& new_tok
 
     const size_t suffix_len = new_tokens.size() - common;
     const auto t0           = std::chrono::steady_clock::now();
-    if (suffix_len > 0) {
-        llama_batch batch =
-            llama_batch_get_one(const_cast<llama_token*>(new_tokens.data() + common), static_cast<int32_t>(suffix_len));
+    // Decode the suffix in n_batch-sized chunks: a single llama_decode larger
+    // than n_batch trips GGML_ASSERT(n_tokens <= n_batch) and aborts the process
+    // (seen with long histories after a KV-clearing reload). Positions advance
+    // automatically across successive llama_batch_get_one calls.
+    const size_t n_batch = std::max<size_t>(1, llama_n_batch(h->ctx));
+    for (size_t offset = 0; offset < suffix_len; offset += n_batch) {
+        const size_t chunk = std::min(n_batch, suffix_len - offset);
+        llama_batch batch  = llama_batch_get_one(const_cast<llama_token*>(new_tokens.data() + common + offset),
+                                                 static_cast<int32_t>(chunk));
         if (llama_decode(h->ctx, batch) != 0) {
             llama_memory_clear(memory, true);
             h->kv_tokens.clear();

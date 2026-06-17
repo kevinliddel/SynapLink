@@ -3,11 +3,14 @@
 //  SynapLink
 //
 //  Device-tier engine tuning — the single place that decides context size,
-//  threads and KV quantization per RAM class. Values for the 4 GB tier are
-//  NeuraLink's device-sweep results (LLMRuntimeProfile): ctx 1024, 2 threads
-//  (more spills onto E-cores and hurts decode), q4_0 KV + flash attention.
-//  Pulled forward from Phase 5 after E2B-on-iPhone-11 jetsam crashes showed
-//  the one-size default (ctx 2048 / 4 threads / q8_0) was wrong for A13.
+//  threads and KV quantization per RAM class. The 4 GB tier keeps 2 threads
+//  (more spills onto E-cores and hurts decode) and q4_0 KV — NeuraLink's A13
+//  device-sweep results. The old ctx-1024 cap was specifically to survive
+//  Gemma 4 E2B's KV on the iPhone 11; E2B is now RAM-gated to ≥6 GB, so the
+//  4 GB tier only runs the small Gemma 3 1B, whose q4_0 KV at 2048 ctx is well
+//  under ~100 MB — trivial here. Raised to 2048 so a reply plus the prior turn
+//  fit in context (at ctx 1024 a single long answer trimmed out the whole
+//  prior exchange, and follow-ups lost the conversation).
 //
 
 import Foundation
@@ -27,8 +30,10 @@ enum RuntimeProfile {
         let gb = physicalMemoryGB
         switch gb {
         case ..<5.0:
-            // iPhone 11/12/13 class — proven NeuraLink 4 GB profile.
-            params.nCtx = 1024
+            // iPhone 11/12/13 class — runs the small Gemma 3 1B (E2B is gated
+            // to ≥6 GB). 2048 ctx fits a reply + the prior turn for follow-ups;
+            // its q4_0 KV is tiny for a 1B model, so memory stays well in budget.
+            params.nCtx = 2048
             params.nThreads = 2
             params.kvTypeK = .q4_0
             params.kvTypeV = .q4_0
@@ -98,8 +103,11 @@ enum RuntimeProfile {
         switch physicalMemoryGB {
         case ..<5.0:
             // iPhone 11 tier: small canvas keeps the CPU diffusion working set
-            // modest (and faster, since this tier runs on CPU — see below).
-            return ImageGenSettings(width: 256, height: 256, steps: 16,
+            // modest. Diffusion time is ~linear in steps and each step is ~15 s
+            // on the A13's 2 usable cores, so 8 steps (a fast Euler-A preview)
+            // keeps it near ~2 min instead of ~4. Quality is rough — this tier
+            // is experimental; raise steps for fidelity if a device can wait.
+            return ImageGenSettings(width: 256, height: 256, steps: 8,
                                     cfgScale: 7.0, sampleMethod: eulerAncestral)
         case ..<7.0:
             return ImageGenSettings(width: 512, height: 512, steps: 20,

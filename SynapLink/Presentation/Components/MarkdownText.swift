@@ -27,6 +27,40 @@ struct MarkdownText: View {
         return (try? AttributedString(markdown: text, options: options))
             ?? AttributedString(text)
     }
+
+    /// Markdown flattened to clean readable text — no `#`, `*`, `` ` ``, link
+    /// URLs, list/quote markers, fences or rules. Used for Copy and read-aloud
+    /// so neither surfaces raw syntax. Reuses the block parser, then strips
+    /// inline syntax per block.
+    static func plain(_ text: String) -> String {
+        func stripInline(_ string: String) -> String {
+            String(inline(string).characters)
+        }
+
+        var parts: [String] = []
+        for chunk in StreamChunkParser.parse(text) {
+            switch chunk {
+            case .paragraph(_, let body), .heading(_, _, let body):
+                parts.append(stripInline(body))
+            case .code(_, _, let code):
+                parts.append(code)
+            case .quote(_, let lines):
+                parts.append(lines.map { stripInline($0.text) }.joined(separator: "\n"))
+            case .list(_, let items):
+                parts.append(items.map { stripInline($0.text) }.joined(separator: "\n"))
+            case .table(_, let data):
+                let rows = [data.headers] + data.rows
+                parts.append(rows.map { row in
+                    row.map(stripInline).joined(separator: ", ")
+                }.joined(separator: "\n"))
+            case .image(_, let alt, _):
+                if !alt.isEmpty { parts.append(alt) }
+            case .rule, .audio:
+                break
+            }
+        }
+        return parts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 // MARK: - Code block card
