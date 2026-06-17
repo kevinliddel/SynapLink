@@ -71,6 +71,7 @@ final class ImageGenerator: @unchecked Sendable {
 
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
+                let started = DispatchTime.now()
                 guard let handle = synap_sd_create(
                     model.path, taesd?.path, RuntimeProfile.specialistThreads,
                     RuntimeProfile.imageGenUsesGPU) else {
@@ -79,7 +80,8 @@ final class ImageGenerator: @unchecked Sendable {
                     return
                 }
                 defer { synap_sd_free(handle) }
-                slog("SD model loaded, generating…", .debug)
+                let loadSeconds = Self.elapsed(since: started)
+                slog("SD model loaded in \(String(format: "%.1f", loadSeconds))s, generating…", .debug)
 
                 var width: Int32 = 0
                 var height: Int32 = 0
@@ -104,10 +106,18 @@ final class ImageGenerator: @unchecked Sendable {
                     continuation.resume(throwing: ImageGenError.generationFailed)
                     return
                 }
-                slog("image generated: \(width)x\(height), \(jpeg.count / 1024) KB", .info)
+                let totalSeconds = Self.elapsed(since: started)
+                slog("image generated: \(width)x\(height), \(jpeg.count / 1024) KB in "
+                    + "\(String(format: "%.1f", totalSeconds))s (load \(String(format: "%.1f", loadSeconds))s, "
+                    + "\(settings.steps) steps)", .info)
                 continuation.resume(returning: jpeg)
             }
         }
+    }
+
+    /// Wall-clock seconds since `start` (monotonic).
+    private static func elapsed(since start: DispatchTime) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
     }
 
     /// Pack tightly-packed RGB888 into a JPEG.
