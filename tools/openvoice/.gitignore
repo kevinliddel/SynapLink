@@ -1,9 +1,12 @@
-# Heavy prototype artifacts — never commit these.
+# Heavy / local prototype artifacts — never commit these.
 vendor/
 checkpoints/
 onnx/
 outputs/
+voices/
 *.onnx
 *.pth
 *.zip
+*.log
+*.aiff
 __pycache__/
