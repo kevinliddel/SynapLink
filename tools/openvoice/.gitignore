@@ -1,0 +1,9 @@
+# Heavy prototype artifacts — never commit these.
+vendor/
+checkpoints/
+onnx/
+outputs/
+*.onnx
+*.pth
+*.zip
+__pycache__/
