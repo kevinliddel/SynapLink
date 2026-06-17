@@ -103,8 +103,11 @@ enum RuntimeProfile {
         switch physicalMemoryGB {
         case ..<5.0:
             // iPhone 11 tier: small canvas keeps the CPU diffusion working set
-            // modest (and faster, since this tier runs on CPU — see below).
-            return ImageGenSettings(width: 256, height: 256, steps: 16,
+            // modest. Diffusion time is ~linear in steps and each step is ~15 s
+            // on the A13's 2 usable cores, so 8 steps (a fast Euler-A preview)
+            // keeps it near ~2 min instead of ~4. Quality is rough — this tier
+            // is experimental; raise steps for fidelity if a device can wait.
+            return ImageGenSettings(width: 256, height: 256, steps: 8,
                                     cfgScale: 7.0, sampleMethod: eulerAncestral)
         case ..<7.0:
             return ImageGenSettings(width: 512, height: 512, steps: 20,

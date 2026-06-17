@@ -233,8 +233,12 @@ final class ChatSession {
             await self.unloadEngine()
             do {
                 let jpeg = try await ImageGenerator.shared.generate(prompt: trimmed)
+                // Caption the turn so the text model has a coherent assistant
+                // message — an empty one left the prior "make an image" request
+                // dangling, so a later "thanks" got answered as if still pending.
+                let caption = "Here's the image you asked for."
                 if self.activeChat?.id == chat.id,
-                   let message = self.store.appendMessage(chatID: chat.id, role: .assistant, content: "") {
+                   let message = self.store.appendMessage(chatID: chat.id, role: .assistant, content: caption) {
                     var saved = message
                     if let row = self.store.appendAttachment(messageID: message.id, kind: .image, data: jpeg) {
                         saved.attachments.append(row)
