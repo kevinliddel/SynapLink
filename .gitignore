@@ -72,3 +72,4 @@ PLAN.md
 Frameworks/llama.xcframework/
 Frameworks/whisper.xcframework/
 Frameworks/sd.xcframework/
+Frameworks/onnxruntime.xcframework/
