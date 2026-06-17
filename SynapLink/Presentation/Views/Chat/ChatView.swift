@@ -194,6 +194,7 @@ struct ChatView: View {
                             analyzingIndicator
                         } else {
                             MessageBubble(role: .assistant, text: session.streamingText, isStreaming: true)
+                                .id("streaming")
                         }
                     }
                     if session.isCreatingImage {
@@ -222,6 +223,12 @@ struct ChatView: View {
                         proxy.scrollTo(last.id, anchor: .top)
                     }
                 }
+            }
+            .onChange(of: session.streamingText) {
+                // Follow the streaming reply: keep its latest line just above the
+                // input bar. While the reply is short this clamps to the top (the
+                // user message stays pinned); once it fills the screen it scrolls.
+                proxy.scrollTo("streaming", anchor: .bottom)
             }
             .onAppear {
                 if let last = session.messages.last {

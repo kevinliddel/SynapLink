@@ -285,10 +285,15 @@ final class ChatSession {
                     slog("media turn → \(resolved.directMedia.count) direct, user text: \"\(resolved.promptText)\"", .info)
                 }
                 let prompt = try await self.engine.applyChatTemplate(history)
+                // Clamp the reply length to the space the prompt leaves in the
+                // window, so a long prompt + a big maxNewTokens can't overflow KV.
+                let promptTokens = history.reduce(0) { $0 + self.estimateTokens($1.content) }
+                let headroom = max(64, self.loadedNCtx - promptTokens - 32)
+                let maxNew = Int32(min(self.settings.maxNewTokens, headroom))
                 for try await piece in self.engine.generate(
                     prompt: prompt,
                     media: resolved.directMedia,
-                    maxNewTokens: Int32(self.settings.maxNewTokens)) {
+                    maxNewTokens: maxNew) {
                     self.isAnalyzingMedia = false
                     self.streamingText += piece
                 }
@@ -359,54 +364,6 @@ final class ChatSession {
         return result
     }
 
-    // MARK: - Home topic suggestions
-
-    /// Ask the model for a few short, varied topics to surface on Home. A
-    /// one-off generation that reuses the loaded engine (warming it for the
-    /// first real chat). Returns [] on any failure — purely decorative.
-    func suggestTopics(count: Int = 5) async -> [String] {
-        await ensureEngineLoaded()
-        guard case .ready = engineState, !isGenerating else { return [] }
-
-        let messages = [
-            ChatMessage(role: "system",
-                        content: "You suggest short, intriguing topics for an AI chat app."),
-            ChatMessage(role: "user",
-                        content: "List \(count) diverse topics someone might enjoy exploring with "
-                            + "an AI assistant — mix science, history, technology, culture, health, "
-                            + "and everyday curiosity. Each must be 2 to 5 words. No numbering, no "
-                            + "explanations, no end punctuation. Output exactly one topic per line.")
-        ]
-        guard let prompt = try? await engine.applyChatTemplate(messages) else { return [] }
-
-        var raw = ""
-        do {
-            for try await piece in engine.generate(prompt: prompt, maxNewTokens: 128) {
-                raw += piece
-            }
-        } catch {
-            return []  // decorative — never surface errors for it
-        }
-        return Self.parseTopics(raw, limit: count)
-    }
-
-    /// One topic per line, stripped of bullets/numbering/quotes; deduped.
-    static func parseTopics(_ raw: String, limit: Int) -> [String] {
-        var topics: [String] = []
-        for line in raw.split(whereSeparator: \.isNewline) {
-            var item = line.trimmingCharacters(in: .whitespaces)
-            item = item.replacingOccurrences(of: "^[-*•+]+\\s*", with: "", options: .regularExpression)
-            item = item.replacingOccurrences(of: "^\\d+[.)]\\s*", with: "", options: .regularExpression)
-            item = item.trimmingCharacters(in: CharacterSet(charactersIn: " \"'“”‘’.!,*#`:-"))
-            guard item.count >= 2, item.count <= 42 else { continue }
-            if !topics.contains(where: { $0.caseInsensitiveCompare(item) == .orderedSame }) {
-                topics.append(item)
-            }
-            if topics.count == limit { break }
-        }
-        return topics
-    }
-
     // MARK: - Model-generated chat title
 
     /// Once the conversation has ≥5 messages, ask the model itself for a
@@ -461,8 +418,19 @@ final class ChatSession {
     /// budget (PLAN.md Phase 1 policy; summarize-on-overflow comes later).
     /// The newest user message is always included even if it alone busts the
     /// budget — the engine clamps the rest.
+    /// Tokens set aside for the reply when budgeting the prompt. We deliberately
+    /// do NOT reserve the full `maxNewTokens`: a user cranking "max reply length"
+    /// toward the context size would otherwise collapse the history budget to the
+    /// 256 floor, trimming away the prior turn so follow-ups lose all context
+    /// (observed: budget 256 with maxNewTokens ≈ ctx). Cap the reservation at
+    /// ~40 % of the window so history keeps the majority share; generation still
+    /// streams up to `maxNewTokens`, clamped per-turn to the free space.
+    private var generationReserve: Int {
+        min(settings.maxNewTokens, Int(Double(loadedNCtx) * 0.4))
+    }
+
     private func trimmedHistory() -> [ChatMessage] {
-        let budget = max(256, Int(Double(loadedNCtx - settings.maxNewTokens) * 0.85))
+        let budget = max(256, Int(Double(loadedNCtx - generationReserve) * 0.85))
 
         var result: [ChatMessage] = []
         var used = estimateTokens(settings.systemPrompt)
@@ -477,6 +445,8 @@ final class ChatSession {
 
         result.append(ChatMessage(role: "system", content: settings.systemPrompt))
         result.append(contentsOf: window.reversed())
+        slog("history → \(window.count)/\(messages.count) msgs, ~\(used)/\(budget) tok, ctx \(loadedNCtx)",
+            window.count < min(messages.count, 2) ? .warning : .info)
         return result
     }
 
