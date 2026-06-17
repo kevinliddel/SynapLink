@@ -12,8 +12,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_NAME="openvoice"
 VENDOR="${HERE}/vendor"
 CKPT_DIR="${HERE}/checkpoints"
-# V1 base-speaker + tone-color-converter checkpoints (self-contained).
-CKPT_URL="https://myshell-public-repo-host.s3.amazonaws.com/openvoice/checkpoints_1226.zip"
+# The old S3 zips are 404; the checkpoints live on HuggingFace now. We only need
+# the tone-color CONVERTER (ref_enc + voice_conversion) for the export — the V2
+# converter is the same architecture as V1 and higher quality.
+HF_CONVERTER="https://huggingface.co/myshell-ai/OpenVoiceV2/resolve/main/converter"
 
 echo "== conda env (${ENV_NAME}, python 3.11) =="
 if ! conda env list | grep -qE "^\s*${ENV_NAME}\s"; then
@@ -26,23 +28,26 @@ if [ ! -d "${VENDOR}/OpenVoice" ]; then
     git clone --depth 1 https://github.com/myshell-ai/OpenVoice "${VENDOR}/OpenVoice"
 fi
 
-echo "== python deps (CPU torch + onnx + openvoice) =="
-# CPU-only torch keeps the download small and matches the dev Mac (Intel, no CUDA).
+echo "== python deps (CPU torch + onnx) =="
+# We load the converter directly from openvoice.models (pure torch+numpy), so we
+# DON'T need librosa/numba/llvmlite (their source build was failing) or the text
+# frontend. All of these have prebuilt cp311 macOS wheels.
 conda run -n "${ENV_NAME}" python -m pip install --upgrade pip
 conda run -n "${ENV_NAME}" python -m pip install \
     "torch" "torchaudio" --index-url https://download.pytorch.org/whl/cpu
+# numpy<2: the CPU torch wheel's C-extension is built against NumPy 1.x, so
+# NumPy 2 breaks tensor.numpy(). 1.26.x works (ignore OpenVoice's numpy==1.22 pin).
 conda run -n "${ENV_NAME}" python -m pip install \
-    "onnx" "onnxruntime" "librosa" "soundfile" "numpy" "scipy" "inflect" "unidecode"
-# OpenVoice itself (pulls its own pinned deps; --no-deps if it fights torch).
-conda run -n "${ENV_NAME}" python -m pip install -e "${VENDOR}/OpenVoice" || \
-    conda run -n "${ENV_NAME}" python -m pip install --no-deps -e "${VENDOR}/OpenVoice"
+    "numpy<2" "onnx" "onnxruntime" "soundfile"
+# Register the `openvoice` package WITHOUT its stale pinned deps (numpy==1.22 /
+# librosa==0.9.1 have no py3.11 wheels and would re-trigger the llvmlite build).
+conda run -n "${ENV_NAME}" python -m pip install --no-deps -e "${VENDOR}/OpenVoice"
 
-echo "== checkpoints =="
-mkdir -p "${CKPT_DIR}"
-if [ ! -d "${CKPT_DIR}/checkpoints" ] && [ ! -d "${CKPT_DIR}/base_speakers" ]; then
-    echo "Downloading V1 checkpoints…"
-    curl -L --fail -o "${CKPT_DIR}/ckpt.zip" "${CKPT_URL}"
-    ( cd "${CKPT_DIR}" && unzip -o ckpt.zip && rm -f ckpt.zip )
+echo "== checkpoints (V2 converter from HuggingFace) =="
+mkdir -p "${CKPT_DIR}/converter"
+if [ ! -f "${CKPT_DIR}/converter/checkpoint.pth" ]; then
+    curl -L --fail -o "${CKPT_DIR}/converter/config.json" "${HF_CONVERTER}/config.json"
+    curl -L --fail -o "${CKPT_DIR}/converter/checkpoint.pth" "${HF_CONVERTER}/checkpoint.pth"
 fi
 
 echo

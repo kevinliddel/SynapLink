@@ -1,0 +1,84 @@
+== conda env (openvoice, python 3.11) ==
+== clone OpenVoice ==
+== python deps (CPU torch + onnx) ==
+Requirement already satisfied: pip in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (26.1.2)
+
+Looking in indexes: https://download.pytorch.org/whl/cpu
+Requirement already satisfied: torch in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (2.2.2)
+Requirement already satisfied: torchaudio in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (2.2.2)
+Requirement already satisfied: filelock in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from torch) (3.29.0)
+Requirement already satisfied: typing-extensions>=4.8.0 in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from torch) (4.15.0)
+Requirement already satisfied: sympy in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from torch) (1.14.0)
+Requirement already satisfied: networkx in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from torch) (3.6.1)
+Requirement already satisfied: jinja2 in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from torch) (3.1.6)
+Requirement already satisfied: fsspec in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from torch) (2026.4.0)
+Requirement already satisfied: MarkupSafe>=2.0 in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from jinja2->torch) (3.0.2)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from sympy->torch) (1.3.0)
+
+Collecting numpy
+  Using cached numpy-2.4.6-cp311-cp311-macosx_14_0_x86_64.whl.metadata (6.6 kB)
+Collecting onnx
+  Using cached onnx-1.22.0-cp311-cp311-macosx_12_0_universal2.whl.metadata (8.5 kB)
+Collecting onnxruntime
+  Using cached onnxruntime-1.23.2-cp311-cp311-macosx_13_0_x86_64.whl.metadata (5.1 kB)
+Collecting soundfile
+  Using cached soundfile-0.14.0-py2.py3-none-macosx_10_9_x86_64.whl.metadata (18 kB)
+Collecting protobuf>=4.25.1 (from onnx)
+  Using cached protobuf-7.35.1-cp310-abi3-macosx_10_9_universal2.whl.metadata (595 bytes)
+Requirement already satisfied: typing_extensions>=4.15.0 in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from onnx) (4.15.0)
+Collecting ml_dtypes>=0.5.4 (from onnx)
+  Using cached ml_dtypes-0.5.4-cp311-cp311-macosx_10_9_universal2.whl.metadata (8.9 kB)
+Collecting coloredlogs (from onnxruntime)
+  Using cached coloredlogs-15.0.1-py2.py3-none-any.whl.metadata (12 kB)
+Collecting flatbuffers (from onnxruntime)
+  Using cached flatbuffers-25.12.19-py2.py3-none-any.whl.metadata (1.0 kB)
+Collecting packaging (from onnxruntime)
+  Using cached packaging-26.2-py3-none-any.whl.metadata (3.5 kB)
+Requirement already satisfied: sympy in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from onnxruntime) (1.14.0)
+Collecting cffi>=1.0 (from soundfile)
+  Using cached cffi-2.0.0-cp311-cp311-macosx_10_13_x86_64.whl.metadata (2.6 kB)
+Collecting pycparser (from cffi>=1.0->soundfile)
+  Using cached pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+Collecting humanfriendly>=9.1 (from coloredlogs->onnxruntime)
+  Using cached humanfriendly-10.0-py2.py3-none-any.whl.metadata (9.2 kB)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in /usr/local/anaconda3/envs/openvoice/lib/python3.11/site-packages (from sympy->onnxruntime) (1.3.0)
+Using cached numpy-2.4.6-cp311-cp311-macosx_14_0_x86_64.whl (6.8 MB)
+Using cached onnx-1.22.0-cp311-cp311-macosx_12_0_universal2.whl (20.2 MB)
+Using cached onnxruntime-1.23.2-cp311-cp311-macosx_13_0_x86_64.whl (19.2 MB)
+Using cached soundfile-0.14.0-py2.py3-none-macosx_10_9_x86_64.whl (1.1 MB)
+Using cached cffi-2.0.0-cp311-cp311-macosx_10_13_x86_64.whl (184 kB)
+Using cached ml_dtypes-0.5.4-cp311-cp311-macosx_10_9_universal2.whl (679 kB)
+Using cached protobuf-7.35.1-cp310-abi3-macosx_10_9_universal2.whl (433 kB)
+Using cached coloredlogs-15.0.1-py2.py3-none-any.whl (46 kB)
+Using cached humanfriendly-10.0-py2.py3-none-any.whl (86 kB)
+Using cached flatbuffers-25.12.19-py2.py3-none-any.whl (26 kB)
+Using cached packaging-26.2-py3-none-any.whl (100 kB)
+Using cached pycparser-3.0-py3-none-any.whl (48 kB)
+Installing collected packages: flatbuffers, pycparser, protobuf, packaging, numpy, humanfriendly, ml_dtypes, coloredlogs, cffi, soundfile, onnxruntime, onnx
+
+Successfully installed cffi-2.0.0 coloredlogs-15.0.1 flatbuffers-25.12.19 humanfriendly-10.0 ml_dtypes-0.5.4 numpy-2.4.6 onnx-1.22.0 onnxruntime-1.23.2 packaging-26.2 protobuf-7.35.1 pycparser-3.0 soundfile-0.14.0
+
+Obtaining file:///Users/mac/Dedicatus/SynapLink/tools/openvoice/vendor/OpenVoice
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Getting requirements to build editable: started
+  Getting requirements to build editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: MyShell-OpenVoice
+  Building editable for MyShell-OpenVoice (pyproject.toml): started
+  Building editable for MyShell-OpenVoice (pyproject.toml): finished with status 'done'
+  Created wheel for MyShell-OpenVoice: filename=myshell_openvoice-0.0.0-0.editable-py3-none-any.whl size=5642 sha256=c15323246adb5d2b85c5e9fa4d173c0173d533d5d59b4698f99bcde4b2951347
+  Stored in directory: /private/var/folders/6n/bcsf_1dj0xg3y8h_ln7g900w0000gn/T/pip-ephem-wheel-cache-7jaskmwq/wheels/a1/cd/ec/d1a9dfeef995349756c06f9ca1c4d68b0114ed70cdab66fed9
+Successfully built MyShell-OpenVoice
+Installing collected packages: MyShell-OpenVoice
+Successfully installed MyShell-OpenVoice-0.0.0
+
+== checkpoints ==
+Downloading V1 checkpoints…
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:--  0:00:01 --:--:--     0
+curl: (22) The requested URL returned error: 404
