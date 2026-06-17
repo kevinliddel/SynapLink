@@ -24,6 +24,7 @@ struct ChatView: View {
     @State private var showImageGen = false
     @State private var specialists = SpecialistManager.shared
     @State private var viewportHeight: CGFloat = 0
+    @FocusState private var inputFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,7 +40,8 @@ struct ChatView: View {
                 onSend: sendDraft,
                 onStop: { session.stop() },
                 onCamera: { showAttachDialog = true },
-                onVoice: { showVoiceMode = true })
+                onVoice: { showVoiceMode = true },
+                focused: $inputFocused)
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -229,6 +231,16 @@ struct ChatView: View {
                 // input bar. While the reply is short this clamps to the top (the
                 // user message stays pinned); once it fills the screen it scrolls.
                 proxy.scrollTo("streaming", anchor: .bottom)
+            }
+            .onChange(of: session.isGenerating) { _, generating in
+                // Reply finished: settle the scroll on it and open the keyboard so
+                // the next message can be typed straight away. The bottom spacer
+                // has collapsed, so scroll explicitly to the final bubble.
+                guard !generating, let last = session.messages.last else { return }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+                inputFocused = true
             }
             .onAppear {
                 if let last = session.messages.last {

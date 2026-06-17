@@ -26,7 +26,8 @@ struct ChatInputBar: View {
     var onCamera: () -> Void
     var onVoice: () -> Void
 
-    @FocusState private var focused: Bool
+    /// Owned by ChatView so it can open the keyboard when a reply finishes.
+    var focused: FocusState<Bool>.Binding
 
     private var hasDraft: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -55,7 +56,7 @@ struct ChatInputBar: View {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .strokeBorder(.quaternary, lineWidth: 1)
                 )
-                .focused($focused)
+                .focused(focused)
                 .disabled(isGenerating)
 
             trailingButton
@@ -103,15 +104,17 @@ struct ChatInputBar: View {
 }
 
 #Preview("Multimodal") {
+    @Previewable @FocusState var focused: Bool
     ChatInputBar(
         draft: .constant(""), supportsVision: true, supportsAudio: true,
         isGenerating: false, canSend: true,
-        onSend: {}, onStop: {}, onCamera: {}, onVoice: {})
+        onSend: {}, onStop: {}, onCamera: {}, onVoice: {}, focused: $focused)
 }
 
 #Preview("Text only") {
+    @Previewable @FocusState var focused: Bool
     ChatInputBar(
         draft: .constant("Hello"), supportsVision: false, supportsAudio: false,
         isGenerating: false, canSend: true,
-        onSend: {}, onStop: {}, onCamera: {}, onVoice: {})
+        onSend: {}, onStop: {}, onCamera: {}, onVoice: {}, focused: $focused)
 }
