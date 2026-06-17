@@ -96,10 +96,13 @@ struct MessageBubble: View {
     }
 
     private var actionRow: some View {
-        HStack(spacing: 22) {
-            iconButton("doc.on.doc", "Copy") { UIPasteboard.general.string = text }
-            iconButton(speech.isSpeaking(text) ? "stop.fill" : "speaker.wave.2",
-                       "Read aloud") { speech.toggle(text) }
+        // Copy and read-aloud operate on the markdown flattened to plain text,
+        // so neither pastes nor reads raw syntax (** , #, `code`, link URLs…).
+        let plain = MarkdownText.plain(text)
+        return HStack(spacing: 22) {
+            iconButton("doc.on.doc", "Copy") { UIPasteboard.general.string = plain }
+            iconButton(speech.isSpeaking(plain) ? "stop.fill" : "speaker.wave.2",
+                       "Read aloud") { speech.toggle(plain) }
             Spacer()
             if let onRegenerate {
                 iconButton("arrow.clockwise", "Regenerate", action: onRegenerate)
