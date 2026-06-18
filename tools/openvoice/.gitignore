@@ -9,6 +9,7 @@ voices/
 *.zip
 *.log
 *.aiff
+*.data
 __pycache__/
 # Regenerable bake outputs — canonical copies are committed in SynapLink/Resources/Voice/
 assets/
