@@ -27,6 +27,8 @@ final class VoiceCloner {
 
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
+    private var bufferedForStart = 0.0  // main-thread: audio queued before play starts
+    private var playStarted = false
 
     // Gap inserted *after* trimming each chunk's silence on both ends, so these
     // are the entire inter-chunk pause. Kept short — the synthesized punctuation
@@ -36,6 +38,11 @@ final class VoiceCloner {
     ]
     private static let sentenceEnders: Set<Character> = [".", "!", "?"]
     private static let maxChunkChars = 200
+    /// Audio buffered before playback starts. Synthesis runs faster than real
+    /// time, so this head start lets the queue stay ahead and prevents the
+    /// underrun gaps heard when a short sentence precedes a long one (e.g. across
+    /// paragraphs). Short replies start as soon as the last chunk is ready.
+    private static let startCushion: Double = 1.5
     private let sampleRate = Double(synap_voice_sample_rate())
 
     private init() {}
@@ -222,9 +229,10 @@ final class VoiceCloner {
                 slog("voice: audio engine failed — \(error.localizedDescription)", .error)
                 return
             }
-            player.play()
             self.engine = engine
             self.player = player
+            self.bufferedForStart = 0
+            self.playStarted = false  // play() deferred until the cushion fills (see schedule)
         }
     }
 
@@ -240,6 +248,13 @@ final class VoiceCloner {
             DispatchQueue.main.async {
                 if self?.isCurrent(job) == true { onFinish() }
             }
+        }
+        // Defer playback until enough is queued (or it's the final chunk) so the
+        // player keeps a lead over synthesis and doesn't underrun between chunks.
+        bufferedForStart += Double(samples.count) / sampleRate
+        if !playStarted, bufferedForStart >= Self.startCushion || last {
+            player.play()
+            playStarted = true
         }
     }
 }
