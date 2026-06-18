@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
     std::vector<float> src = read_se(argv[4]), tgt = read_se(argv[5]);
     if (src.empty() || tgt.empty()) { fprintf(stderr, "bad se file\n"); return 2; }
 
-    SynapVoice* v = synap_voice_create(argv[1], argv[2]);
+    SynapVoice* v = synap_voice_create(argv[1], argv[2], nullptr);  // legacy chunks: no ja_bert
     if (!v) { fprintf(stderr, "synap_voice_create failed\n"); return 3; }
 
     const int sr = synap_voice_sample_rate();
@@ -85,7 +85,8 @@ int main(int argc, char** argv) {
         const auto& c = chunks[i];
         float* audio = nullptr;
         int32_t n = synap_voice_say(v, c.phones.data(), c.tones.data(), c.langs.data(),
-                                    static_cast<int32_t>(c.phones.size()), sid, src.data(), tgt.data(), &audio);
+                                    static_cast<int32_t>(c.phones.size()), sid, src.data(), tgt.data(),
+                                    nullptr, nullptr, 0, &audio);
         if (n < 0) { fprintf(stderr, "say failed on chunk %zu (rc %d)\n", i, n); synap_voice_free(v); return 4; }
         out.insert(out.end(), audio, audio + n);
         synap_voice_free_audio(audio);

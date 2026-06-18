@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-iOS step: export the MeloTTS EN VITS (no-BERT) to ONNX -> onnx/melo_en.onnx.
-Inputs are produced by the g2p frontend (phones/tones/lang_ids); BERT features
-are fed as zeros (no-BERT decision). Deterministic config (sdp_ratio=0) for a
-clean export.
+iOS step: export the MeloTTS EN VITS to ONNX -> onnx/melo_en.onnx.
+Inputs are produced by the g2p frontend (phones/tones/lang_ids). ja_bert may be
+fed real bert-base-uncased features (intonation) or zeros; the graph always
+applies ja_bert_proj either way. sdp_ratio=0.2 (MeloTTS default) enables the
+stochastic duration predictor for natural rhythm/intonation — the SDP subgraph
+is exported regardless (it was previously traced as sdp(...)*0.0).
 
 Run with: KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
 """
@@ -55,7 +57,7 @@ def main():
         def forward(self, x, x_len, sid, tone, lang, bert, ja_bert):
             return self.m.infer(x, x_len, sid, tone, lang, bert, ja_bert,
                                 noise_scale=0.6, length_scale=1.0,
-                                noise_scale_w=0.8, sdp_ratio=0.0)[0]
+                                noise_scale_w=0.8, sdp_ratio=0.2)[0]
 
     out = os.path.join(ONNX, "melo_en.onnx")
     torch.onnx.export(

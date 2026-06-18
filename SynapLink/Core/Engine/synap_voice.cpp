@@ -51,10 +51,14 @@ std::vector<float> make_lowpass() {
 
 }  // namespace
 
+constexpr int kBertDim = 768;  // bert-base-uncased hidden -> ja_bert channels
+
 struct SynapVoice {
     Ort::Env env{ORT_LOGGING_LEVEL_WARNING, "synap_voice"};
     Ort::Session melo{nullptr};
     Ort::Session converter{nullptr};
+    Ort::Session bert{nullptr};  // optional prosody BERT (may be unset)
+    bool has_bert = false;
     Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     FFTSetup fft = nullptr;
     std::vector<float> hann;     // periodic Hann(1024)
@@ -92,6 +96,34 @@ struct SynapVoice {
         return spec;
     }
 
+    // --- BERT prosody: input_ids -> hidden[-3] -> ja_bert[768, n] ---
+    // Repeats token i's 768-vec word2ph[i] times along the phone axis (melo's
+    // get_bert_feature). Layout matches melo's ja_bert input [1, 768, n].
+    std::vector<float> build_ja_bert(const int64_t* input_ids, const int32_t* word2ph,
+                                     int n_ids, int n) {
+        std::vector<float> ja(static_cast<size_t>(kBertDim) * n, 0.0f);
+        std::vector<int64_t> mask(n_ids, 1), ttype(n_ids, 0);
+        std::vector<int64_t> shape{1, n_ids};
+        Ort::Value in[] = {
+            Ort::Value::CreateTensor<int64_t>(mem, const_cast<int64_t*>(input_ids), n_ids, shape.data(), 2),
+            Ort::Value::CreateTensor<int64_t>(mem, mask.data(), n_ids, shape.data(), 2),
+            Ort::Value::CreateTensor<int64_t>(mem, ttype.data(), n_ids, shape.data(), 2),
+        };
+        const char* in_names[] = {"input_ids", "attention_mask", "token_type_ids"};
+        const char* out_names[] = {"hidden"};
+        auto out = bert.Run(Ort::RunOptions{nullptr}, in_names, in, 3, out_names, 1);
+        const float* hidden = out[0].GetTensorMutableData<float>();  // [n_ids, 768] row-major
+        int col = 0;
+        for (int i = 0; i < n_ids && col < n; ++i) {
+            for (int r = 0; r < word2ph[i] && col < n; ++r, ++col) {
+                for (int c = 0; c < kBertDim; ++c) {
+                    ja[static_cast<size_t>(c) * n + col] = hidden[static_cast<size_t>(i) * kBertDim + c];
+                }
+            }
+        }
+        return ja;
+    }
+
     // --- 2:1 anti-aliased decimation, 44.1 kHz -> 22.05 kHz ---
     std::vector<float> resample_half(const float* x, int n) {
         const int outN = n / 2, half = kLPTaps / 2;
@@ -111,7 +143,8 @@ struct SynapVoice {
 
 extern "C" {
 
-SynapVoice* synap_voice_create(const char* melo_path, const char* converter_path) {
+SynapVoice* synap_voice_create(const char* melo_path, const char* converter_path,
+                               const char* bert_path) {
     if (!melo_path || !converter_path) { return nullptr; }
     try {
         auto* v = new SynapVoice();
@@ -120,6 +153,10 @@ SynapVoice* synap_voice_create(const char* melo_path, const char* converter_path
         opt.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         v->melo = Ort::Session(v->env, melo_path, opt);
         v->converter = Ort::Session(v->env, converter_path, opt);
+        if (bert_path) {
+            v->bert = Ort::Session(v->env, bert_path, opt);
+            v->has_bert = true;
+        }
         v->fft = vDSP_create_fftsetup(kLog2N, FFT_RADIX2);
         v->hann.resize(kWin);
         for (int i = 0; i < kWin; ++i) { v->hann[i] = 0.5f - 0.5f * std::cos(2.0f * M_PI * i / kWin); }
@@ -140,14 +177,22 @@ void synap_voice_free(SynapVoice* v) {
 int32_t synap_voice_say(SynapVoice* v,
                         const int64_t* phones, const int64_t* tones, const int64_t* langs,
                         int32_t n, int64_t sid, const float* src_se, const float* tgt_se,
+                        const int64_t* input_ids, const int32_t* word2ph, int32_t n_ids,
                         float** out_audio) {
     if (!v || !phones || !tones || !langs || n <= 0 || !src_se || !tgt_se || !out_audio) { return -1; }
     try {
-        // ---- MeloTTS: phones/tones/langs (+ zero BERT) -> 44.1 kHz audio ----
+        // ---- MeloTTS: phones/tones/langs + bert -> 44.1 kHz audio ----
+        // bert (1024-dim slot) is zero for English; ja_bert (768) carries the
+        // prosody when a BERT session + alignment are supplied, else zeros.
         const int64_t len = n;
         std::vector<int64_t> shape_seq{1, len};
-        std::vector<float> bert_f(static_cast<size_t>(1024) * n, 0.0f);   // no-BERT: zeros
-        std::vector<float> ja_bert_f(static_cast<size_t>(768) * n, 0.0f);
+        std::vector<float> bert_f(static_cast<size_t>(1024) * n, 0.0f);
+        std::vector<float> ja_bert_f;
+        if (v->has_bert && input_ids && word2ph && n_ids > 0) {
+            ja_bert_f = v->build_ja_bert(input_ids, word2ph, n_ids, n);
+        } else {
+            ja_bert_f.assign(static_cast<size_t>(768) * n, 0.0f);
+        }
         int64_t xlen = len, sidv = sid;
         std::vector<int64_t> shape_bert{1, 1024, len}, shape_ja{1, 768, len}, one{1};
 
@@ -201,5 +246,17 @@ int32_t synap_voice_say(SynapVoice* v,
 void synap_voice_free_audio(float* audio) { std::free(audio); }
 
 int32_t synap_voice_sample_rate(void) { return kOutSR; }
+
+int32_t synap_voice_debug_ja_bert(SynapVoice* v, const int64_t* input_ids, const int32_t* word2ph,
+                                  int32_t n_ids, int32_t n, float* out_ja) {
+    if (!v || !v->has_bert || !input_ids || !word2ph || n_ids <= 0 || n <= 0 || !out_ja) { return -1; }
+    try {
+        std::vector<float> ja = v->build_ja_bert(input_ids, word2ph, n_ids, n);
+        std::memcpy(out_ja, ja.data(), ja.size() * sizeof(float));
+        return n;
+    } catch (const std::exception&) {
+        return -2;
+    }
+}
 
 }  // extern "C"

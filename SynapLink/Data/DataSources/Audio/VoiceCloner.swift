@@ -78,8 +78,8 @@ final class VoiceCloner {
         startEngine(job: job)
         for (index, chunk) in chunks.enumerated() {
             if !isCurrent(job) { return }  // stopped / superseded
-            let (phones, tones, langs) = g2p.encode(chunk.text)
-            guard var audio = synth(handle: handle, phones: phones, tones: tones, langs: langs, tgt: tgt) else { continue }
+            let enc = g2p.encode(chunk.text)
+            guard var audio = synth(handle: handle, enc: enc, tgt: tgt) else { continue }
             audio = Self.trimTrailingSilence(audio)
             if chunk.pause > 0 {
                 audio.append(contentsOf: repeatElement(0, count: Int(chunk.pause * sampleRate)))
@@ -97,16 +97,27 @@ final class VoiceCloner {
         if handle != nil { return true }
         guard let melo = Bundle.main.url(forResource: "melo_en", withExtension: "onnx"),
               let conv = Bundle.main.url(forResource: "voice_conversion", withExtension: "onnx"),
-              let h = synap_voice_create(melo.path, conv.path),
               let src = bundledF32("se_source_en"),
               let g = G2P() else {
             slog("voice: model/g2p load failed", .error)
+            return false
+        }
+        // Optional prosody BERT — absent => intonation off, voice still works.
+        let bert = Bundle.main.url(forResource: "bert_en", withExtension: "onnx")?.path
+        guard let h = makeHandle(melo: melo.path, converter: conv.path, bert: bert) else {
+            slog("voice: engine create failed", .error)
             return false
         }
         handle = h
         srcSE = src
         g2p = g
         return true
+    }
+
+    /// String args auto-bridge to C strings; the optional bert path needs the branch.
+    private func makeHandle(melo: String, converter: String, bert: String?) -> OpaquePointer? {
+        if let bert { return synap_voice_create(melo, converter, bert) }
+        return synap_voice_create(melo, converter, nil)
     }
 
     private func targetSE(_ name: String) -> [Float]? {
@@ -124,16 +135,22 @@ final class VoiceCloner {
 
     // MARK: - Synthesis
 
-    private func synth(handle: OpaquePointer, phones: [Int64], tones: [Int64], langs: [Int64],
-                       tgt: [Float]) -> [Float]? {
+    private func synth(handle: OpaquePointer, enc: G2P.Encoded, tgt: [Float]) -> [Float]? {
         var out: UnsafeMutablePointer<Float>?
-        let n = phones.withUnsafeBufferPointer { p in
-            tones.withUnsafeBufferPointer { t in
-                langs.withUnsafeBufferPointer { l in
+        let n = enc.phones.withUnsafeBufferPointer { p in
+            enc.tones.withUnsafeBufferPointer { t in
+                enc.langs.withUnsafeBufferPointer { l in
                     srcSE.withUnsafeBufferPointer { s in
                         tgt.withUnsafeBufferPointer { g in
-                            synap_voice_say(handle, p.baseAddress, t.baseAddress, l.baseAddress,
-                                            Int32(phones.count), 0, s.baseAddress, g.baseAddress, &out)
+                            enc.inputIds.withUnsafeBufferPointer { ids in
+                                enc.word2ph.withUnsafeBufferPointer { w2p in
+                                    synap_voice_say(
+                                        handle, p.baseAddress, t.baseAddress, l.baseAddress,
+                                        Int32(enc.phones.count), 0, s.baseAddress, g.baseAddress,
+                                        ids.baseAddress, w2p.baseAddress, Int32(enc.inputIds.count),
+                                        &out)
+                                }
+                            }
                         }
                     }
                 }
