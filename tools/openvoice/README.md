@@ -3,9 +3,15 @@
 Goal: clone a target voice (from a short reference clip / mp4) and use it for the
 "read aloud" TTS, **fully on-device**, via OpenVoice + ONNX Runtime.
 
-This folder is the **Phase 0 desktop de-risk**: get OpenVoice running, clone a
-voice, export the models to ONNX, and measure quality + speed **before** we add a
-neural runtime to the iOS app. Nothing here ships in the app yet.
+> **Status: SHIPPED.** This now runs in the app (read-aloud cloned voices on the
+> 4 GB iPhone 11). See **[docs/VOICE_CLONING.md](../../docs/VOICE_CLONING.md)** for
+> the shipped architecture and a step-by-step guide to **adding your own voice**.
+> The phases below are the original de-risk plan, kept for historical context.
+
+This folder began as the **Phase 0 desktop de-risk**: get OpenVoice running, clone
+a voice, export the models to ONNX, and measure quality + speed before adding a
+neural runtime to the iOS app. It now also holds the export/bake/validation
+tooling the shipped feature is reproduced from.
 
 ## The pipeline (grounded in the OpenVoice source)
 
