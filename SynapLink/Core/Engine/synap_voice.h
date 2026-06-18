@@ -36,6 +36,8 @@ void synap_voice_free(SynapVoice* voice);
 ///   input_ids/word2ph  : BERT WordPiece ids (len `n_ids`) + per-id phone counts
 ///                        (sum == n). Pass NULL / n_ids<=0 for no intonation.
 ///   out_audio          : receives a malloc'd 22.05 kHz mono float buffer
+///   out_stage_ms       : optional; if non-NULL, receives 4 stage timings in ms
+///                        [bert, melo, spec, converter] for profiling.
 /// Returns the sample count (>0), or a negative error code. Free with
 /// synap_voice_free_audio.
 int32_t synap_voice_say(SynapVoice* voice,
@@ -43,7 +45,7 @@ int32_t synap_voice_say(SynapVoice* voice,
                         int32_t n, int64_t sid,
                         const float* src_se, const float* tgt_se,
                         const int64_t* input_ids, const int32_t* word2ph, int32_t n_ids,
-                        float** out_audio);
+                        float** out_audio, double* out_stage_ms);
 
 void synap_voice_free_audio(float* audio);
 

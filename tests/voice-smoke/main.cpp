@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
         float* audio = nullptr;
         int32_t n = synap_voice_say(v, c.phones.data(), c.tones.data(), c.langs.data(),
                                     static_cast<int32_t>(c.phones.size()), sid, src.data(), tgt.data(),
-                                    nullptr, nullptr, 0, &audio);
+                                    nullptr, nullptr, 0, &audio, nullptr);
         if (n < 0) { fprintf(stderr, "say failed on chunk %zu (rc %d)\n", i, n); synap_voice_free(v); return 4; }
         out.insert(out.end(), audio, audio + n);
         synap_voice_free_audio(audio);

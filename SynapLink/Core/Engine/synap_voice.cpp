@@ -16,10 +16,12 @@
 
 #include <Accelerate/Accelerate.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -149,7 +151,10 @@ SynapVoice* synap_voice_create(const char* melo_path, const char* converter_path
     try {
         auto* v = new SynapVoice();
         Ort::SessionOptions opt;
-        opt.SetIntraOpNumThreads(2);
+        // melo + converter are sequential and compute-bound; use all cores
+        // (A13 = 6) rather than pinning to 2. Biggest lever on synth throughput.
+        const unsigned cores = std::thread::hardware_concurrency();
+        opt.SetIntraOpNumThreads(cores > 0 ? static_cast<int>(cores) : 4);
         opt.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         v->melo = Ort::Session(v->env, melo_path, opt);
         v->converter = Ort::Session(v->env, converter_path, opt);
@@ -178,8 +183,12 @@ int32_t synap_voice_say(SynapVoice* v,
                         const int64_t* phones, const int64_t* tones, const int64_t* langs,
                         int32_t n, int64_t sid, const float* src_se, const float* tgt_se,
                         const int64_t* input_ids, const int32_t* word2ph, int32_t n_ids,
-                        float** out_audio) {
+                        float** out_audio, double* out_stage_ms) {
     if (!v || !phones || !tones || !langs || n <= 0 || !src_se || !tgt_se || !out_audio) { return -1; }
+    using clock = std::chrono::steady_clock;
+    auto since = [](clock::time_point a) {
+        return std::chrono::duration<double, std::milli>(clock::now() - a).count();
+    };
     try {
         // ---- MeloTTS: phones/tones/langs + bert -> 44.1 kHz audio ----
         // bert (1024-dim slot) is zero for English; ja_bert (768) carries the
@@ -188,11 +197,13 @@ int32_t synap_voice_say(SynapVoice* v,
         std::vector<int64_t> shape_seq{1, len};
         std::vector<float> bert_f(static_cast<size_t>(1024) * n, 0.0f);
         std::vector<float> ja_bert_f;
+        auto t_bert = clock::now();
         if (v->has_bert && input_ids && word2ph && n_ids > 0) {
             ja_bert_f = v->build_ja_bert(input_ids, word2ph, n_ids, n);
         } else {
             ja_bert_f.assign(static_cast<size_t>(768) * n, 0.0f);
         }
+        const double bert_ms = since(t_bert);
         int64_t xlen = len, sidv = sid;
         std::vector<int64_t> shape_bert{1, 1024, len}, shape_ja{1, 768, len}, one{1};
 
@@ -207,17 +218,22 @@ int32_t synap_voice_say(SynapVoice* v,
         };
         const char* melo_in_names[] = {"x", "x_lengths", "sid", "tones", "lang_ids", "bert", "ja_bert"};
         const char* melo_out_names[] = {"audio"};
+        auto t_melo = clock::now();
         auto melo_out = v->melo.Run(Ort::RunOptions{nullptr}, melo_in_names, melo_in, 7, melo_out_names, 1);
+        const double melo_ms = since(t_melo);
         float* a44 = melo_out[0].GetTensorMutableData<float>();
         auto a44_shape = melo_out[0].GetTensorTypeAndShapeInfo().GetShape();
         int n44 = static_cast<int>(a44_shape[a44_shape.size() - 1]);
 
         // ---- resample 44.1k -> 22.05k, STFT ----
+        auto t_spec = clock::now();
         std::vector<float> a22 = v->resample_half(a44, n44);
         int n_frames = 0;
         std::vector<float> spec = v->stft(a22, n_frames);
+        const double spec_ms = since(t_spec);
 
         // ---- converter: spec + source/target embeddings -> 22.05 kHz audio ----
+        auto t_conv = clock::now();
         int64_t t = n_frames;
         std::vector<int64_t> shape_spec{1, kSpecBins, t}, shape_se{1, 256, 1};
         Ort::Value conv_in[] = {
@@ -229,6 +245,7 @@ int32_t synap_voice_say(SynapVoice* v,
         const char* conv_in_names[] = {"spec", "lengths", "src_se", "tgt_se"};
         const char* conv_out_names[] = {"audio"};
         auto conv_out = v->converter.Run(Ort::RunOptions{nullptr}, conv_in_names, conv_in, 4, conv_out_names, 1);
+        const double conv_ms = since(t_conv);
         float* aout = conv_out[0].GetTensorMutableData<float>();
         auto out_shape = conv_out[0].GetTensorTypeAndShapeInfo().GetShape();
         int nout = static_cast<int>(out_shape[out_shape.size() - 1]);
@@ -237,6 +254,10 @@ int32_t synap_voice_say(SynapVoice* v,
         if (!buf) { return -2; }
         std::memcpy(buf, aout, static_cast<size_t>(nout) * sizeof(float));
         *out_audio = buf;
+        if (out_stage_ms) {
+            out_stage_ms[0] = bert_ms; out_stage_ms[1] = melo_ms;
+            out_stage_ms[2] = spec_ms; out_stage_ms[3] = conv_ms;
+        }
         return nout;
     } catch (const std::exception&) {
         return -3;

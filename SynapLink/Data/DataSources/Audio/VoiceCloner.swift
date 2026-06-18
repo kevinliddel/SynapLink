@@ -37,7 +37,13 @@ final class VoiceCloner {
         ",": 0.05, ";": 0.06, ":": 0.06, ".": 0.12, "!": 0.12, "?": 0.12
     ]
     private static let sentenceEnders: Set<Character> = [".", "!", "?"]
-    private static let maxChunkChars = 200
+    private static let maxChunkChars = 220
+    /// Group consecutive short sentences until a chunk reaches this length before
+    /// breaking. Keeps chunks a steady size so no tiny chunk (a paragraph's short
+    /// closing sentence) precedes a long one and starves the player — and fewer,
+    /// larger chunks amortize the per-chunk BERT/ORT cost (better realtime ratio).
+    /// Internal sentence breaks are still voiced natively by MeloTTS.
+    private static let minChunkChars = 60
     /// Audio buffered before playback starts. Synthesis runs faster than real
     /// time, so this head start lets the queue stay ahead and prevents the
     /// underrun gaps heard when a short sentence precedes a long one (e.g. across
@@ -89,14 +95,15 @@ final class VoiceCloner {
             if !isCurrent(job) { return }  // stopped / superseded
             let enc = g2p.encode(chunk.text)
             let t0 = DispatchTime.now().uptimeNanoseconds
-            guard var audio = synth(handle: handle, enc: enc, tgt: tgt) else { continue }
+            guard let result = synth(handle: handle, enc: enc, tgt: tgt) else { continue }
             let synthSec = Double(DispatchTime.now().uptimeNanoseconds &- t0) / 1e9
-            audio = Self.trimSilence(audio)
+            var audio = Self.trimSilence(result.audio)
             guard !audio.isEmpty else { continue }
             let audioSec = Double(audio.count) / sampleRate
-            slog(String(format: "voice chunk %d/%d: %.2fs audio in %.2fs (%.2fx rt) +%.2fs pause [%d ids]",
-                        index + 1, chunks.count, audioSec, synthSec,
-                        audioSec / max(synthSec, 0.001), chunk.pause, enc.inputIds.count), .notice)
+            let s = result.stageMs
+            slog(String(format: "voice chunk %d/%d: %.2fs audio in %.2fs (%.2fx rt) — bert %.0f / melo %.0f / spec %.0f / conv %.0f ms [%d ids]",
+                        index + 1, chunks.count, audioSec, synthSec, audioSec / max(synthSec, 0.001),
+                        s[0], s[1], s[2], s[3], enc.inputIds.count), .notice)
             if chunk.pause > 0 {
                 audio.append(contentsOf: repeatElement(0, count: Int(chunk.pause * sampleRate)))
             }
@@ -151,8 +158,9 @@ final class VoiceCloner {
 
     // MARK: - Synthesis
 
-    private func synth(handle: OpaquePointer, enc: G2P.Encoded, tgt: [Float]) -> [Float]? {
+    private func synth(handle: OpaquePointer, enc: G2P.Encoded, tgt: [Float]) -> (audio: [Float], stageMs: [Double])? {
         var out: UnsafeMutablePointer<Float>?
+        var stage = [Double](repeating: 0, count: 4)  // bert, melo, spec, conv
         let n = enc.phones.withUnsafeBufferPointer { p in
             enc.tones.withUnsafeBufferPointer { t in
                 enc.langs.withUnsafeBufferPointer { l in
@@ -160,11 +168,13 @@ final class VoiceCloner {
                         tgt.withUnsafeBufferPointer { g in
                             enc.inputIds.withUnsafeBufferPointer { ids in
                                 enc.word2ph.withUnsafeBufferPointer { w2p in
-                                    synap_voice_say(
-                                        handle, p.baseAddress, t.baseAddress, l.baseAddress,
-                                        Int32(enc.phones.count), 0, s.baseAddress, g.baseAddress,
-                                        ids.baseAddress, w2p.baseAddress, Int32(enc.inputIds.count),
-                                        &out)
+                                    stage.withUnsafeMutableBufferPointer { sm in
+                                        synap_voice_say(
+                                            handle, p.baseAddress, t.baseAddress, l.baseAddress,
+                                            Int32(enc.phones.count), 0, s.baseAddress, g.baseAddress,
+                                            ids.baseAddress, w2p.baseAddress, Int32(enc.inputIds.count),
+                                            &out, sm.baseAddress)
+                                    }
                                 }
                             }
                         }
@@ -174,7 +184,7 @@ final class VoiceCloner {
         }
         guard n > 0, let out else { return nil }
         defer { synap_voice_free_audio(out) }
-        return Array(UnsafeBufferPointer(start: out, count: Int(n)))
+        return (Array(UnsafeBufferPointer(start: out, count: Int(n))), stage)
     }
 
     /// MeloTTS pads every chunk with leading + trailing near-silence (the "_"
@@ -192,10 +202,10 @@ final class VoiceCloner {
 
     private struct Chunk { let text: String; let pause: Double }
 
-    /// Split at SENTENCE boundaries (. ! ?) so melo + BERT see the whole
-    /// sentence — far better intonation, and commas are voiced natively instead
-    /// of fragmenting prosody. Very long sentences soft-break at a comma/space
-    /// past maxChunkChars to bound time-to-first-audio.
+    /// Group whole sentences into chunks of ~minChunkChars…maxChunkChars: melo +
+    /// BERT get full sentences (good intonation, commas voiced natively), but
+    /// short sentences merge so no tiny chunk starves the player. A single very
+    /// long sentence soft-breaks at a comma/space past maxChunkChars.
     private func chunkize(_ text: String) -> [Chunk] {
         var chunks: [Chunk] = []
         var buf = ""
@@ -207,7 +217,11 @@ final class VoiceCloner {
         for ch in text {
             buf.append(ch)
             if Self.sentenceEnders.contains(ch) {
-                flush(Self.pauseMap[ch] ?? 0.12)
+                // Break only once the chunk is long enough; otherwise keep
+                // accumulating (the sentence break is then voiced by MeloTTS).
+                if buf.trimmingCharacters(in: .whitespacesAndNewlines).count >= Self.minChunkChars {
+                    flush(Self.pauseMap[ch] ?? 0.12)
+                }
             } else if buf.count >= Self.maxChunkChars, ch == "," || ch == ";" || ch == " " {
                 flush(Self.pauseMap[ch] ?? 0.05)
             }
