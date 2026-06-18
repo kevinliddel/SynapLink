@@ -40,8 +40,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Appearance")
-                } footer: {
-                    Text("Follows the system by default — tap to pin Light or Dark.")
                 }
 
                 Section {
@@ -59,8 +57,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Voice")
-                } footer: {
-                    Text("Used when you tap the speaker on a reply. Cloned voices run fully on-device.")
                 }
 
                 Section("Models") {
@@ -86,8 +82,6 @@ struct SettingsView: View {
                     .font(.caption)
                 } header: {
                     Text("System Prompt")
-                } footer: {
-                    Text("Sent at the start of every conversation.")
                 }
 
                 Section("Generation") {
@@ -109,15 +103,6 @@ struct SettingsView: View {
                             Text("Performance Test")
                         } icon: {
                             rowIcon("speedometer", .orange)
-                        }
-                    }
-                    NavigationLink {
-                        LogView()
-                    } label: {
-                        Label {
-                            Text("Logs")
-                        } icon: {
-                            rowIcon("text.alignleft", .gray)
                         }
                     }
                 }
@@ -170,8 +155,6 @@ struct SettingsView: View {
                     Spacer()
                     Text(version).foregroundStyle(.secondary)
                 }
-            } footer: {
-                Text("SynapLink runs entirely on your device. Nothing leaves your iPhone.")
             }
         }
     }
@@ -223,10 +206,14 @@ private struct ThemeSwitcher: View {
 
             HStack(spacing: 0) {
                 Image(systemName: "sun.max.fill")
-                    .foregroundStyle(isDark ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                    .foregroundStyle(
+                        isDark ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange)
+                    )
                     .frame(maxWidth: .infinity)
                 Image(systemName: "moon.fill")
-                    .foregroundStyle(isDark ? AnyShapeStyle(Color.indigo) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(
+                        isDark ? AnyShapeStyle(Color.indigo) : AnyShapeStyle(.secondary)
+                    )
                     .frame(maxWidth: .infinity)
             }
             .font(.system(size: 13, weight: .bold))

@@ -88,9 +88,15 @@ final class VoiceCloner {
         for (index, chunk) in chunks.enumerated() {
             if !isCurrent(job) { return }  // stopped / superseded
             let enc = g2p.encode(chunk.text)
+            let t0 = DispatchTime.now().uptimeNanoseconds
             guard var audio = synth(handle: handle, enc: enc, tgt: tgt) else { continue }
+            let synthSec = Double(DispatchTime.now().uptimeNanoseconds &- t0) / 1e9
             audio = Self.trimSilence(audio)
             guard !audio.isEmpty else { continue }
+            let audioSec = Double(audio.count) / sampleRate
+            slog(String(format: "voice chunk %d/%d: %.2fs audio in %.2fs (%.2fx rt) +%.2fs pause [%d ids]",
+                        index + 1, chunks.count, audioSec, synthSec,
+                        audioSec / max(synthSec, 0.001), chunk.pause, enc.inputIds.count), .notice)
             if chunk.pause > 0 {
                 audio.append(contentsOf: repeatElement(0, count: Int(chunk.pause * sampleRate)))
             }
@@ -255,6 +261,7 @@ final class VoiceCloner {
         if !playStarted, bufferedForStart >= Self.startCushion || last {
             player.play()
             playStarted = true
+            slog(String(format: "voice playback start: %.2fs buffered", bufferedForStart), .notice)
         }
     }
 }
