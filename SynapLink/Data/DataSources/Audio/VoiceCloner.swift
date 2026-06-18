@@ -28,8 +28,11 @@ final class VoiceCloner {
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
 
+    // Gap inserted *after* trimming the model's own (variable) trailing silence,
+    // so these are the real inter-chunk pauses. Kept short — the synthesized
+    // punctuation already carries most of the prosodic break.
     private static let pauseMap: [Character: Double] = [
-        ",": 0.18, ";": 0.18, ":": 0.18, ".": 0.40, "!": 0.40, "?": 0.40
+        ",": 0.07, ";": 0.09, ":": 0.09, ".": 0.16, "!": 0.16, "?": 0.16
     ]
     private let sampleRate = Double(synap_voice_sample_rate())
 
@@ -77,6 +80,7 @@ final class VoiceCloner {
             if !isCurrent(job) { return }  // stopped / superseded
             let (phones, tones, langs) = g2p.encode(chunk.text)
             guard var audio = synth(handle: handle, phones: phones, tones: tones, langs: langs, tgt: tgt) else { continue }
+            audio = Self.trimTrailingSilence(audio)
             if chunk.pause > 0 {
                 audio.append(contentsOf: repeatElement(0, count: Int(chunk.pause * sampleRate)))
             }
@@ -138,6 +142,17 @@ final class VoiceCloner {
         guard n > 0, let out else { return nil }
         defer { synap_voice_free_audio(out) }
         return Array(UnsafeBufferPointer(start: out, count: Int(n)))
+    }
+
+    /// MeloTTS leaves a variable amount of near-silence at the end of each chunk
+    /// (the synthesized punctuation tail), which made the added pauses feel long
+    /// and uneven. Drop it back to the last audible sample (+ a short margin) so
+    /// the pauseMap gap is the only inter-chunk silence.
+    private static func trimTrailingSilence(_ audio: [Float], threshold: Float = 0.015,
+                                            margin: Int = 220) -> [Float] {
+        guard let last = audio.lastIndex(where: { abs($0) > threshold }) else { return audio }
+        let end = min(audio.count, last + margin + 1)
+        return Array(audio[..<end])
     }
 
     private struct Chunk { let text: String; let pause: Double }
