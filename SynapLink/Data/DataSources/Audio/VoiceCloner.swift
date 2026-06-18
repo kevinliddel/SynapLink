@@ -28,12 +28,14 @@ final class VoiceCloner {
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
 
-    // Gap inserted *after* trimming the model's own (variable) trailing silence,
-    // so these are the real inter-chunk pauses. Kept short — the synthesized
-    // punctuation already carries most of the prosodic break.
+    // Gap inserted *after* trimming each chunk's silence on both ends, so these
+    // are the entire inter-chunk pause. Kept short — the synthesized punctuation
+    // already carries most of the prosodic break.
     private static let pauseMap: [Character: Double] = [
-        ",": 0.07, ";": 0.09, ":": 0.09, ".": 0.16, "!": 0.16, "?": 0.16
+        ",": 0.05, ";": 0.06, ":": 0.06, ".": 0.12, "!": 0.12, "?": 0.12
     ]
+    private static let sentenceEnders: Set<Character> = [".", "!", "?"]
+    private static let maxChunkChars = 200
     private let sampleRate = Double(synap_voice_sample_rate())
 
     private init() {}
@@ -80,7 +82,8 @@ final class VoiceCloner {
             if !isCurrent(job) { return }  // stopped / superseded
             let enc = g2p.encode(chunk.text)
             guard var audio = synth(handle: handle, enc: enc, tgt: tgt) else { continue }
-            audio = Self.trimTrailingSilence(audio)
+            audio = Self.trimSilence(audio)
+            guard !audio.isEmpty else { continue }
             if chunk.pause > 0 {
                 audio.append(contentsOf: repeatElement(0, count: Int(chunk.pause * sampleRate)))
             }
@@ -161,31 +164,42 @@ final class VoiceCloner {
         return Array(UnsafeBufferPointer(start: out, count: Int(n)))
     }
 
-    /// MeloTTS leaves a variable amount of near-silence at the end of each chunk
-    /// (the synthesized punctuation tail), which made the added pauses feel long
-    /// and uneven. Drop it back to the last audible sample (+ a short margin) so
-    /// the pauseMap gap is the only inter-chunk silence.
-    private static func trimTrailingSilence(_ audio: [Float], threshold: Float = 0.015,
-                                            margin: Int = 220) -> [Float] {
-        guard let last = audio.lastIndex(where: { abs($0) > threshold }) else { return audio }
+    /// MeloTTS pads every chunk with leading + trailing near-silence (the "_"
+    /// pad + SDP-variable blank durations), which made inter-chunk gaps long and
+    /// uneven. Trim BOTH ends to the audible region (+ a short margin) so the
+    /// pauseMap gap is the only silence between chunks. Empty if all silence.
+    private static func trimSilence(_ audio: [Float], threshold: Float = 0.015,
+                                    margin: Int = 160) -> [Float] {
+        guard let first = audio.firstIndex(where: { abs($0) > threshold }),
+              let last = audio.lastIndex(where: { abs($0) > threshold }) else { return [] }
+        let start = max(0, first - margin)
         let end = min(audio.count, last + margin + 1)
-        return Array(audio[..<end])
+        return Array(audio[start..<end])
     }
 
     private struct Chunk { let text: String; let pause: Double }
 
+    /// Split at SENTENCE boundaries (. ! ?) so melo + BERT see the whole
+    /// sentence — far better intonation, and commas are voiced natively instead
+    /// of fragmenting prosody. Very long sentences soft-break at a comma/space
+    /// past maxChunkChars to bound time-to-first-audio.
     private func chunkize(_ text: String) -> [Chunk] {
         var chunks: [Chunk] = []
         var buf = ""
+        func flush(_ pause: Double) {
+            let trimmed = buf.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.count > 1 { chunks.append(Chunk(text: trimmed, pause: pause)) }
+            buf = ""
+        }
         for ch in text {
             buf.append(ch)
-            if let pause = Self.pauseMap[ch] {
-                let trimmed = buf.trimmingCharacters(in: .whitespaces)
-                if trimmed.count > 1 { chunks.append(Chunk(text: trimmed, pause: pause)) }
-                buf = ""
+            if Self.sentenceEnders.contains(ch) {
+                flush(Self.pauseMap[ch] ?? 0.12)
+            } else if buf.count >= Self.maxChunkChars, ch == "," || ch == ";" || ch == " " {
+                flush(Self.pauseMap[ch] ?? 0.05)
             }
         }
-        let tail = buf.trimmingCharacters(in: .whitespaces)
+        let tail = buf.trimmingCharacters(in: .whitespacesAndNewlines)
         if !tail.isEmpty { chunks.append(Chunk(text: tail, pause: 0)) }
         return chunks
     }
