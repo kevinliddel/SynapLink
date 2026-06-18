@@ -71,6 +71,16 @@ jobs:
         if: steps.sd-cache.outputs.cache-hit != 'true'
         run: scripts/build-sd-xcframework.sh
 
+      - name: Cache onnxruntime.xcframework
+        id: ort-cache
+        uses: actions/cache@v4
+        with:
+          path: Frameworks/onnxruntime.xcframework
+          key: onnxruntime-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-onnxruntime-xcframework.sh') }}
+      - name: Fetch onnxruntime.xcframework
+        if: steps.ort-cache.outputs.cache-hit != 'true'
+        run: scripts/build-onnxruntime-xcframework.sh
+
   engine-test:
     name: Engine smoke test (macOS)
     runs-on: macos-latest
@@ -134,6 +144,13 @@ jobs:
         with:
           path: Frameworks/sd.xcframework
           key: sd-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-sd-xcframework.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Restore onnxruntime.xcframework
+        uses: actions/cache/restore@v4
+        with:
+          path: Frameworks/onnxruntime.xcframework
+          key: onnxruntime-xcframework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-onnxruntime-xcframework.sh') }}
           fail-on-cache-miss: true
 
       - name: Cache test model

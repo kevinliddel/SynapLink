@@ -9,27 +9,71 @@ Baseline device: **iPhone 11 (A13, 4 GB RAM)**.
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────┐
-│ SwiftUI (Chat UI, streaming bubbles, voice UI, settings) │
-├──────────────────────────────────────────────────────────┤
-│ Swift service layer                                      │
-│  ChatSession · VoiceLoop (AVAudioEngine) · RAGService    │
-│  ModelManager (download/verify/load) · MemoryGovernor    │
-├──────────────────────────────────────────────────────────┤
-│ C++ core (Swift⇄C++ interop or thin C shim)              │
-│  InferenceEngine: llama.cpp + libmtmd                    │
-│   - streaming token callback                             │
-│   - mtmd tokenization of image/audio chunks              │
-│   - prompt cache / KV reuse across turns                 │
-│  Embedder: llama.cpp embedding context                   │
-├──────────────────────────────────────────────────────────┤
-│ Storage (all local, encrypted)                           │
-│  SQLite (chats, messages, settings) — SQLCipher or       │
-│  file-level NSFileProtectionComplete + Keychain keys     │
-│  Vector store: sqlite-vec (or flat-file + brute force)   │
-│  — corpus is small on-device)                            │
-└──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    %% UI Layer
+    subgraph UI["SwiftUI Layer"]
+        UI1["Chat UI<br/>Streaming bubbles<br/>Voice UI / Settings"]
+    end
+
+    %% Service Layer
+    subgraph Service["Swift Service Layer"]
+        CS["ChatSession"]
+        VL["VoiceLoop<br/>AVAudioEngine"]
+        RAG["RAGService"]
+        MM["ModelManager<br/>(download / verify / load)"]
+        MG["MemoryGovernor"]
+    end
+
+    %% C++ Core
+    subgraph Core["C++ Core"]
+        IE["InferenceEngine<br/>llama.cpp + libmtmd"]
+        EMB["Embedder<br/>llama.cpp embeddings"]
+
+        IE --> D1["Streaming Tokens"]
+        IE --> D2["Multimodal Tokenization"]
+        IE --> D3["KV Cache / Prompt Reuse"]
+    end
+
+    %% Storage
+    subgraph Storage["Local Encrypted Storage"]
+        SQL["SQLite<br/>(chats / messages / settings)"]
+        VEC["Vector Store<br/>sqlite-vec / flat file"]
+        SEC["Encryption<br/>SQLCipher / NSFileProtection + Keychain"]
+    end
+
+    %% Flow
+    UI1 --> CS
+    UI1 --> VL
+
+    CS --> RAG
+    CS --> IE
+    RAG --> EMB
+
+    MM --> IE
+    MG --> IE
+
+    EMB --> VEC
+    RAG --> SQL
+    CS --> SQL
+
+    SQL --> SEC
+    VEC --> SEC
+
+    %% Styles
+    classDef ui fill:#f9fafb,stroke:#9ca3af,color:#111827
+    classDef service fill:#eef2ff,stroke:#6366f1,color:#1e3a8a
+    classDef core fill:#ecfdf5,stroke:#10b981,color:#065f46
+    classDef storage fill:#fff7ed,stroke:#f59e0b,color:#7c2d12
+
+    class UI1 ui
+    class CS,VL,RAG,MM,MG service
+    class IE,EMB core
+    class SQL,VEC,SEC storage
+
+    %% Data nodes
+    classDef data fill:#0f172a,stroke:#334155,color:#94a3b8,font-size:11px
+    class D1,D2,D3 data
 ```
 
 ## Layout

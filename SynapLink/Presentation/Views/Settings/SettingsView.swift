@@ -12,10 +12,16 @@ import SwiftUI
 struct SettingsView: View {
     @State private var settings = ChatSettings.shared
     @State private var appearance = AppearanceSettings.shared
+    @State private var voiceSettings = VoiceSettings.shared
     @State private var showModelLibrary = false
 
     // Phase 4 will pull the real profile name; placeholder for now.
     private let userName = "User"
+
+    // Cloned voices appear only when their models are bundled.
+    private var readAloudVoices: [ReadAloudVoice] {
+        VoiceCloner.shared.isAvailable ? ReadAloudVoice.allCases : [.system]
+    }
 
     var body: some View {
         NavigationStack {
@@ -34,8 +40,23 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Appearance")
-                } footer: {
-                    Text("Follows the system by default — tap to pin Light or Dark.")
+                }
+
+                Section {
+                    Picker(selection: Bindable(voiceSettings).voice) {
+                        ForEach(readAloudVoices) { option in
+                            Text(option.gender.map { "\(option.label) · \($0)" } ?? option.label)
+                                .tag(option)
+                        }
+                    } label: {
+                        Label {
+                            Text("Read-aloud voice")
+                        } icon: {
+                            rowIcon("speaker.wave.2.fill", .purple)
+                        }
+                    }
+                } header: {
+                    Text("Voice")
                 }
 
                 Section("Models") {
@@ -61,8 +82,6 @@ struct SettingsView: View {
                     .font(.caption)
                 } header: {
                     Text("System Prompt")
-                } footer: {
-                    Text("Sent at the start of every conversation.")
                 }
 
                 Section("Generation") {
@@ -84,15 +103,6 @@ struct SettingsView: View {
                             Text("Performance Test")
                         } icon: {
                             rowIcon("speedometer", .orange)
-                        }
-                    }
-                    NavigationLink {
-                        LogView()
-                    } label: {
-                        Label {
-                            Text("Logs")
-                        } icon: {
-                            rowIcon("text.alignleft", .gray)
                         }
                     }
                 }
@@ -145,8 +155,6 @@ struct SettingsView: View {
                     Spacer()
                     Text(version).foregroundStyle(.secondary)
                 }
-            } footer: {
-                Text("SynapLink runs entirely on your device. Nothing leaves your iPhone.")
             }
         }
     }
@@ -198,10 +206,14 @@ private struct ThemeSwitcher: View {
 
             HStack(spacing: 0) {
                 Image(systemName: "sun.max.fill")
-                    .foregroundStyle(isDark ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                    .foregroundStyle(
+                        isDark ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange)
+                    )
                     .frame(maxWidth: .infinity)
                 Image(systemName: "moon.fill")
-                    .foregroundStyle(isDark ? AnyShapeStyle(Color.indigo) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(
+                        isDark ? AnyShapeStyle(Color.indigo) : AnyShapeStyle(.secondary)
+                    )
                     .frame(maxWidth: .infinity)
             }
             .font(.system(size: 13, weight: .bold))
