@@ -48,6 +48,16 @@ final class SpeechReader: NSObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        // Cloned voice selected → route to the on-device VoiceCloner.
+        let selected = VoiceSettings.shared.voice
+        if selected.isCloned {
+            spokenText = text
+            VoiceCloner.shared.speak(trimmed, voice: selected) { [weak self] in
+                Task { @MainActor in if self?.spokenText == text { self?.spokenText = nil } }
+            }
+            return
+        }
+
         // Authorize Personal Voice once; it becomes usable on the next utterance.
         if !personalVoiceRequested {
             personalVoiceRequested = true
@@ -90,6 +100,7 @@ final class SpeechReader: NSObject {
 
     func stop() {
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
+        VoiceCloner.shared.stop()
         finish()
     }
 

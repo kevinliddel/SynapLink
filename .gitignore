@@ -73,3 +73,6 @@ Frameworks/llama.xcframework/
 Frameworks/whisper.xcframework/
 Frameworks/sd.xcframework/
 Frameworks/onnxruntime.xcframework/
+# Staged voice ONNX models (reproduce via scripts/stage-voice-models.sh)
+SynapLink/Resources/Voice/*.onnx
+SynapLink/Resources/Voice/g2p_lexicon.txt

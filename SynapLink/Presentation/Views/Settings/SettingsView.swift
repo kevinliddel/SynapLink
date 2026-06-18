@@ -12,10 +12,16 @@ import SwiftUI
 struct SettingsView: View {
     @State private var settings = ChatSettings.shared
     @State private var appearance = AppearanceSettings.shared
+    @State private var voiceSettings = VoiceSettings.shared
     @State private var showModelLibrary = false
 
     // Phase 4 will pull the real profile name; placeholder for now.
     private let userName = "User"
+
+    // Cloned voices appear only when their models are bundled.
+    private var readAloudVoices: [ReadAloudVoice] {
+        VoiceCloner.shared.isAvailable ? ReadAloudVoice.allCases : [.system]
+    }
 
     var body: some View {
         NavigationStack {
@@ -36,6 +42,25 @@ struct SettingsView: View {
                     Text("Appearance")
                 } footer: {
                     Text("Follows the system by default — tap to pin Light or Dark.")
+                }
+
+                Section {
+                    Picker(selection: Bindable(voiceSettings).voice) {
+                        ForEach(readAloudVoices) { option in
+                            Text(option.gender.map { "\(option.label) · \($0)" } ?? option.label)
+                                .tag(option)
+                        }
+                    } label: {
+                        Label {
+                            Text("Read-aloud voice")
+                        } icon: {
+                            rowIcon("speaker.wave.2.fill", .purple)
+                        }
+                    }
+                } header: {
+                    Text("Voice")
+                } footer: {
+                    Text("Used when you tap the speaker on a reply. Cloned voices run fully on-device.")
                 }
 
                 Section("Models") {

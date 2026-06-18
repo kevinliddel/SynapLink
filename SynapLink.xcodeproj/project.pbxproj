@@ -325,6 +325,12 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					Accelerate,
+					"-force_load",
+					"$(BUILT_PRODUCTS_DIR)/onnxruntime.framework/onnxruntime",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.dedicatus.SynapLink;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -361,6 +367,12 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					Accelerate,
+					"-force_load",
+					"$(BUILT_PRODUCTS_DIR)/onnxruntime.framework/onnxruntime",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.dedicatus.SynapLink;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
